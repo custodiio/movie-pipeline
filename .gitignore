@@ -4,4 +4,7 @@ __pycache__/
 *.pyc
 output/
 temp/
+intro.mp4
+*.mp4
+
 
