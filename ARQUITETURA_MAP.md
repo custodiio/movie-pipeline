@@ -55,9 +55,16 @@ Tabela `movies`:
   - Slideshow com imagens em loop e durações alternadas (3-5s).
   - Marca d'água animada estilo DVD bounce com opacidade 30% e fonte Bungee.
   - Salva em `output/<slug>.mp4`.
+- **`src/kaggle_trigger.py`**:
+  - Módulo para disparar a execução remota do notebook no Kaggle enviando um evento `repository_dispatch` para a API do GitHub Actions.
+- **`inject_secrets.py`**:
+  - Script que roda no GitHub Actions antes do `kaggle kernels push` para injetar com segurança as chaves de API (`AZURE_OPENAI`, `GEMINI`, `DEEPSEEK`, `OPENAI`, `DRIVE`) dentro do código do notebook.
+- **`.github/workflows/run-notebook.yml`**:
+  - Workflow automatizado do GitHub Actions que configura o Kaggle CLI, roda o `inject_secrets.py` e executa o `kaggle kernels push` com acelerador GPU Tesla T4.
 - **`notebooks/movie_pipeline_master.ipynb`**:
   - Notebook mestre parametrizado contendo todas as células interativas totalmente preenchidas e prontas para execução no Kaggle/Colab.
 - **`main.py`**:
   - Orquestrador principal da aplicação na VPS. Invoca as funções de cada etapa do pipeline em sequência.
+
 
 

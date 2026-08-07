@@ -1,6 +1,6 @@
 """
 Injeta secrets do GitHub Actions diretamente no código-fonte do notebook .ipynb do Movie-Pipeline.
-Roda no GitHub Actions ANTES do kaggle push.
+Se um secret vier vazio, ignora para permitir o fallback padrão seguro do notebook.
 """
 import json
 import os
@@ -43,7 +43,8 @@ for cell in nb["cells"]:
     new_source = []
     for line in cell["source"]:
         for key, value in secrets.items():
-            if not value: continue
+            if not value or value.strip() == "":
+                continue  # Não substitui se estiver vazio no GitHub secret
             safe_val = json.dumps(value)
             old_line = line
             for fn in ["_ks", "_get", "_get_secret", "load_secret"]:
