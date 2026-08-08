@@ -41,7 +41,9 @@ from dotenv import load_dotenv
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-raw_vip_id = os.getenv("TELEGRAM_VIP_CHANNEL_ID", "-1002113392315")
+TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@dramasleh")
+
+raw_vip_id = os.getenv("TELEGRAM_VIP_CHANNEL_ID", "-1003917174917")
 try:
     TELEGRAM_VIP_CHANNEL_ID = int(raw_vip_id)
 except ValueError:
