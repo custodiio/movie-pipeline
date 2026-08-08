@@ -163,24 +163,28 @@ def render_movie_video(
     ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
     
     # Filtro de vídeo: slideshow + pad 16:9 + ass watermark
-    filter_complex = (
-        f"scale=1920:1080:force_original_aspect_ratio=decrease,"
-        f"pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,"
-        f"ass='{ass_path_escaped}'"
-    )
+    vf_filter = f"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,ass='{ass_path_escaped}'"
+    
+    # Detecta GPU Nvidia NVENC para velocidade ultra-rápida (5x a 10x)
+    has_nvenc = shutil.which("nvidia-smi") is not None
+    codec_video = "h264_nvenc" if has_nvenc else "libx264"
+    preset_opts = ["-preset", "p4"] if has_nvenc else []
+
+    logging.info(f"Renderizando vídeo final com encoder: {codec_video} (Aceleração GPU: {has_nvenc})...")
 
     cmd_slideshow = [
         "ffmpeg", "-y",
-        "-f", "concat", "-safe", "0", "-i", concat_txt,
+        "-f", "concat", "-safe", "0", "-i", concat_txt_path,
         "-i", voiceover_path,
-        "-vf", filter_complex,
-        "-c:v", "libx264", "-pix_fmt", "yuv420p", "-r", "30",
+        "-vf", vf_filter,
+        "-c:v", codec_video
+    ] + preset_opts + [
+        "-pix_fmt", "yuv420p", "-r", "30",
         "-c:a", "aac", "-b:a", "192k",
         "-shortest",
         slideshow_video_temp
     ]
 
-    logging.info("Renderizando bloco do slideshow com marca d'água DVD via FFmpeg...")
     subprocess.run(cmd_slideshow, check=True)
 
     # 4. Verifica existência da Intro do canal
