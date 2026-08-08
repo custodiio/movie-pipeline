@@ -43,18 +43,23 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@dramasleh")
 TELEGRAM_VIP_CHANNEL_ID = os.getenv("TELEGRAM_VIP_CHANNEL_ID", "@telacheiafilmesvip")
-WHATSAPP_SALES_NUMBER = os.getenv("WHATSAPP_SALES_NUMBER", "5564992430964")
-TELEGRAM_SALES_LINK = os.getenv("TELEGRAM_SALES_LINK", f"https://wa.me/{WHATSAPP_SALES_NUMBER}?text=Ol%C3%A1!%20Tenho%20interesse%20e%20gostaria%20de%20adquirir%20o%20acesso%20ao%20Canal%20VIP!")
+TELEGRAM_SALES_PHONE = os.getenv("TELEGRAM_SALES_PHONE", "5564992430964")
+TELEGRAM_SALES_LINK = os.getenv("TELEGRAM_SALES_LINK", "https://t.me/+5564992430964")
 
 def build_sales_link(movie_title: str = None) -> str:
-    """Gera o link de vendas direcionando para o WhatsApp com a mensagem de saudação pronta."""
-    number = os.getenv("WHATSAPP_SALES_NUMBER", WHATSAPP_SALES_NUMBER)
+    """
+    Gera o link de compartilhamento oficial do Telegram com a mensagem de saudação pronta.
+    Abre o app do Telegram permitindo enviar a mensagem preenchida diretamente para o seu contato.
+    """
+    target_link = os.getenv("TELEGRAM_SALES_LINK", "https://t.me/+5564992430964")
     if movie_title:
-        msg = f"Olá! Tenho interesse no filme '{movie_title.upper()}' e gostaria de adquirir o acesso ao Canal VIP!"
+        msg = f"Olá! Tenho interesse no filme '{movie_title.upper()}' e gostaria do acesso ao Canal VIP!"
     else:
-        msg = "Olá! Tenho interesse e gostaria de adquirir o acesso ao Canal VIP de filmes!"
-    encoded = urllib.parse.quote(msg)
-    return f"https://wa.me/{number}?text={encoded}"
+        msg = "Olá! Tenho interesse e gostaria do acesso ao Canal VIP de filmes!"
+    
+    encoded_text = urllib.parse.quote(msg)
+    encoded_url = urllib.parse.quote(target_link)
+    return f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
 
 # Estados da Conversa para Criar Postagem no Canal Público
 STATE_SEARCH_MOVIE, STATE_SELECT_MOVIE, STATE_SELECT_IMAGES, STATE_PREVIEW_POST, STATE_EDIT_COPY = range(5)
