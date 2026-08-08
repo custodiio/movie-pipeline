@@ -38,7 +38,7 @@ def get_audio_duration(audio_path: str) -> float:
 def generate_dvd_bounce_ass(output_ass_path: str, duration_sec: float, width: int = 1920, height: int = 1080) -> str:
     """
     Gera um arquivo de legendas .ass com animação de movimento quicante (DVD Bounce)
-    para o texto da marca d'água com opacidade 30% (Alpha &H4D) e estilo Bungee.
+    para o texto da marca d'água com opacidade 30% (Alpha &H4D) e estilo Bungee em tamanho grande (65pt).
     """
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -48,15 +48,14 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: DVDBounce,Bungee,48,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,1,2,0,5,10,10,10,1
-Style: DVDBounceSub,Bungee,30,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,0,0,0,0,100,100,0,0,1,1,0,5,10,10,10,1
+Style: DVDBounce,Bungee,65,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,1,2,0,5,10,10,10,1
+Style: DVDBounceSub,Bungee,38,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,0,0,0,0,100,100,0,0,1,1,0,5,10,10,10,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
-    # Calcula posições quicantes (bounce) nas 4 pontas da tela ao longo do tempo
     events = []
-    margin_x, margin_y = 200, 150
+    margin_x, margin_y = 250, 180
     positions = [
         (margin_x, margin_y),
         (width - margin_x, margin_y + 100),
@@ -67,7 +66,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     ]
     
     t = 0.0
-    step = 12.0 # MOVIMENTO LENTO DA WATERMARK: 12 segundos por travessia!
+    step = 12.0 # 12 segundos por travessia de canto a canto
 
     pos_idx = 0
     
@@ -85,12 +84,12 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
         t_start_str = format_time(t)
         t_end_str = format_time(t_end)
+        dur_ms = int((t_end - t) * 1000)
         
-        # Tag \\move deve ficar no início do evento ASS uma única vez
-        move_tag = f"\\move({p1[0]},{p1[1]},{p2[0]},{p2[1]})"
+        # Tag \move explícita com coordenadas e tempos em milissegundos
+        move_tag = f"\\move({p1[0]},{p1[1]},{p2[0]},{p2[1]},0,{dur_ms})"
         line_main = f"Dialogue: 0,{t_start_str},{t_end_str},DVDBounce,,0,0,0,,{{{move_tag}}}{WATERMARK_TEXT_MAIN}\\N{WATERMARK_TEXT_SUB}"
         events.append(line_main)
-
         
         t = t_end
         pos_idx += 1
@@ -101,7 +100,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return output_ass_path
 
 def build_slideshow_concat_script(images: list[str], target_duration: float, temp_dir: str) -> str:
-    """Gera um arquivo txt de concat do FFmpeg repetindo as imagens em loop com tempos alternados (3 a 5s)."""
+    """Gera um arquivo txt de concat do FFmpeg repetindo as imagens em loop com tempos alternados (5 a 10s)."""
     concat_txt = os.path.join(temp_dir, "slideshow_list.txt")
     current_time = 0.0
     lines = []
@@ -122,7 +121,6 @@ def build_slideshow_concat_script(images: list[str], target_duration: float, tem
             if current_time >= target_duration:
                 break
                 
-    # FFmpeg concat requer a última imagem repetida no final
     lines.append(f"file '{os.path.abspath(img_pool[0]).replace('\\', '/')}'")
 
     with open(concat_txt, "w", encoding="utf-8") as f:
@@ -137,56 +135,92 @@ def render_movie_video(
     intro_path: str = INTRO_PATH_DEFAULT,
     target_min_hours: float = 1.0
 ) -> str:
-    """Renderiza o vídeo principal do filme (~11 min) e gera instantaneamente o vídeo longo (+1h) via stream loop (-c copy)."""
+    """Renderiza o vídeo montando primeiro a estrutura visual e aplicando o .ass + áudio na passada final."""
     os.makedirs(output_dir, exist_ok=True)
     temp_dir = os.path.join(output_dir, "temp_render")
     os.makedirs(temp_dir, exist_ok=True)
 
     final_output_path = os.path.join(output_dir, f"{slug}.mp4")
-    slideshow_video_temp = os.path.join(temp_dir, "slideshow_temp.mp4")
+    slideshow_base_temp = os.path.join(temp_dir, "slideshow_base.mp4")
     intro_norm_temp = os.path.join(temp_dir, "intro_norm.mp4")
+    video_sem_legenda_temp = os.path.join(temp_dir, "video_sem_legenda.mp4")
     ass_path = os.path.join(temp_dir, "watermark.ass")
 
-    # 1. Calcula duração do áudio da narração
+    # 1. Duração do áudio da narração
     audio_seg = AudioSegment.from_file(voiceover_path)
     narration_duration = len(audio_seg) / 1000.0
 
-    # 2. Gera/Garanta legenda ASS pré-calculada de 30 min (ultraleve)
-    generate_dvd_bounce_ass(ass_path, 1800.0)
-
-    # 3. Cria lista do Concat de Imagens
+    # 2. PASSO 1: Monta o Slideshow de Imagens sem áudio e sem legenda
     concat_txt_path = build_slideshow_concat_script(images, narration_duration, temp_dir)
-
-    slideshow_raw_temp = os.path.join(temp_dir, "slideshow_raw.mp4")
-
-    # 4a. Passada 1: Renderiza o slideshow das fotos + áudio em vídeo contínuo
     vf_scale = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black"
-    cmd_raw = [
+    cmd_base = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0", "-i", concat_txt_path,
-        "-i", voiceover_path,
         "-vf", vf_scale,
         "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
-        "-pix_fmt", "yuv420p", "-r", "30",
-        "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
-        "-shortest",
-        slideshow_raw_temp
+        "-pix_fmt", "yuv420p", "-r", "30", "-an",
+        slideshow_base_temp
     ]
-    logging.info(f"Renderizando base do filme ({narration_duration:.1f}s)...")
-    subprocess.run(cmd_raw, check=True)
+    logging.info(f"🎥 1/3 Renderizando base visual do slideshow ({narration_duration:.1f}s)...")
+    subprocess.run(cmd_base, check=True)
 
-    # 4b. Passada 2: Aplica a marca d'água ASS sobre o vídeo contínuo (animação 100% fluida e sem resets)
-    vf_ass = f"ass='{ass_path_escaped}'"
-    cmd_watermark = [
+    # 3. PASSO 2: Normaliza a Intro e monta o vídeo completo sem áudio/legenda para a duração total do título
+    has_intro = False
+    if os.path.exists(intro_path):
+        logging.info("Normalizando Vinheta Intro...")
+        cmd_intro = [
+            "ffmpeg", "-y", "-i", intro_path,
+            "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black",
+            "-r", "30", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-an",
+            intro_norm_temp
+        ]
+        subprocess.run(cmd_intro, check=True)
+        has_intro = True
+
+    target_sec = target_min_hours * 3600.0 if target_min_hours > 5.0 else target_min_hours * 60.0
+    num_loops = math.ceil(target_sec / narration_duration)
+    total_dur_sec = narration_duration * num_loops
+
+    logging.info(f"⚡ 2/3 Montando estrutura visual de {total_dur_sec/60:.1f} min ({num_loops}x repetições)...")
+    concat_stream_list = os.path.join(temp_dir, "concat_stream.txt")
+    concat_lines = []
+    if has_intro and os.path.exists(intro_norm_temp):
+        concat_lines.append(f"file '{os.path.abspath(intro_norm_temp).replace('\\\\', '/')}'")
+    
+    slide_abs = os.path.abspath(slideshow_base_temp).replace("\\", "/")
+    for _ in range(num_loops):
+        concat_lines.append(f"file '{slide_abs}'")
+
+    with open(concat_stream_list, "w", encoding="utf-8") as f:
+        f.write("\n".join(concat_lines) + "\n")
+
+    cmd_fast_concat = [
         "ffmpeg", "-y",
-        "-i", slideshow_raw_temp,
+        "-f", "concat", "-safe", "0",
+        "-i", concat_stream_list,
+        "-c", "copy",
+        video_sem_legenda_temp
+    ]
+    subprocess.run(cmd_fast_concat, check=True)
+
+    # 4. PASSO 3: Gera o .ass para o tempo total e realiza a RENDERIZAÇÃO FINAL ÚNICA (ÁUDIO + MARCA D'ÁGUA ASS GRANDE)
+    generate_dvd_bounce_ass(ass_path, total_dur_sec + 60.0)
+    ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
+    vf_ass = f"ass='{ass_path_escaped}'"
+
+    cmd_final = [
+        "ffmpeg", "-y",
+        "-i", video_sem_legenda_temp,
+        "-stream_loop", "-1", "-i", voiceover_path,
         "-vf", vf_ass,
         "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
-        "-pix_fmt", "yuv420p", "-c:a", "copy",
-        slideshow_video_temp
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+        "-shortest",
+        final_output_path
     ]
-    logging.info("Aplicando Marca D'água animada em passada única contínua...")
-    subprocess.run(cmd_watermark, check=True)
+    logging.info(f"🎨 3/3 Renderização Final com Marca D'Água Animada Bungee (65pt) + Áudio da Narração em passada contínua...")
+    subprocess.run(cmd_final, check=True)
 
 
     # 4. Normaliza a Intro UMA ÚNICA VEZ para codificação idêntica

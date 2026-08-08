@@ -52,8 +52,8 @@ Tabela `movies`:
   - Renderizador de vídeo no FFmpeg com aceleração por hardware GPU Nvidia NVENC (`h264_nvenc`) a 250+ FPS ou CPU ultra-rápida.
   - Concatenação com a vinheta oficial `intro.mp4`.
   - Slideshow ultra-estável com durações de 5.0s a 10.0s por imagem perfeitamente sincronizadas com o áudio da narração.
-  - Marca d'água animada estilo DVD bounce com `\move` ASS legível, destacada e lenta (12s por movimento), opacidade 30%, fonte Bungee em tamanho 48pt (com fallback DejaVu Sans).
-  - Renderização em 2 passadas (Passada 1: Concatena slideshow + narração; Passada 2: Aplica legenda `.ass` sobre o MP4 contínuo sem resets de filtro durante as trocas de imagens).
+  - Marca d'água animada estilo DVD bounce com `\move` ASS legível, gigante (65pt Bungee) e lenta (12s por travessia), com coordenadas e milissegundos explícitos `\move(x1,y1,x2,y2,0,12000)`.
+  - Renderização modular em 3 etapas exatas (Passo 1: Concatena slideshow base puro de fotos sem legenda/áudio; Passo 2: Monta a estrutura final do filme via stream concat sem legenda; Passo 3: Aplicação final contínua em 1 única passada do áudio + marca d'água ASS Bungee 65pt).
   - Repetição instantânea em modo stream (`-c copy`) até atingir a duração exata do título cadastrada no TXT (`DURACAO_MIN`).
   - Salva em `output/<slug>.mp4`.
 
