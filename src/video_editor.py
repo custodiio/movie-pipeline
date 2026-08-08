@@ -125,103 +125,101 @@ def build_slideshow_concat_script(images: list[str], target_duration: float, tem
 
     with open(concat_txt, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-        
     return concat_txt
 
 def render_movie_video(
     slug: str,
     images: list[str],
     voiceover_path: str,
-    output_dir: str = "output",
-    bgm_path: str = "",
-    intro_path: str = INTRO_PATH
+    output_dir: str = OUTPUT_DIR_DEFAULT,
+    intro_path: str = INTRO_PATH_DEFAULT,
+    target_min_hours: float = 1.0
 ) -> str:
-    """
-    Renderiza o vídeo completo final:
-    1. Renderiza o slideshow de imagens com narração e marca d'água DVD.
-    2. Concatena com a Intro do canal.
-    3. Salva com o nome padronizado <slug>.mp4.
-    """
+    """Renderiza o vídeo principal do filme (~11 min) e gera instantaneamente o vídeo longo (+1h) via stream loop (-c copy)."""
     os.makedirs(output_dir, exist_ok=True)
     temp_dir = os.path.join(output_dir, "temp_render")
     os.makedirs(temp_dir, exist_ok=True)
-    
+
     final_output_path = os.path.join(output_dir, f"{slug}.mp4")
-    slideshow_video_temp = os.path.join(temp_dir, "slideshow_part.mp4")
+    slideshow_video_temp = os.path.join(temp_dir, "slideshow_temp.mp4")
+    intro_norm_temp = os.path.join(temp_dir, "intro_norm.mp4")
     ass_path = os.path.join(temp_dir, "watermark.ass")
 
-    narration_duration = get_audio_duration(voiceover_path)
-    logging.info(f"Duração da narração para '{slug}': {narration_duration:.2f}s")
+    # 1. Calcula duração do áudio da narração
+    audio_seg = AudioSegment.from_file(voiceover_path)
+    narration_duration = len(audio_seg) / 1000.0
 
-    # 1. Gera o arquivo .ass da marca d'água animada
+    # 2. Gera legenda ASS do DVD Bounce
     generate_dvd_bounce_ass(ass_path, narration_duration)
 
-    # 2. Gera a lista de slideshow
+    # 3. Cria lista do Concat de Imagens
     concat_txt_path = build_slideshow_concat_script(images, narration_duration, temp_dir)
 
-    # 3. Comando FFmpeg para montar a parte de slideshow (com zoompan e marca d'água .ass)
     ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
-    
-    # Filtro de vídeo: slideshow + pad 16:9 + ass watermark
     vf_filter = f"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,ass='{ass_path_escaped}'"
-    
-    cmd_cpu = [
+
+    # Renderiza o bloco principal do filme com áudio 44100Hz 2ch para bater exatamente com a intro
+    cmd_slideshow = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0", "-i", concat_txt_path,
         "-i", voiceover_path,
         "-vf", vf_filter,
         "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
         "-pix_fmt", "yuv420p", "-r", "30",
-        "-c:a", "aac", "-b:a", "192k",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
         "-shortest",
         slideshow_video_temp
     ]
+    logging.info(f"Renderizando bloco principal do filme ({narration_duration:.1f}s = {narration_duration/60:.1f}min)...")
+    subprocess.run(cmd_slideshow, check=True)
 
-    try:
-        if shutil.which("nvidia-smi"):
-            cmd_gpu = [
-                "ffmpeg", "-y",
-                "-f", "concat", "-safe", "0", "-i", concat_txt_path,
-                "-i", voiceover_path,
-                "-vf", vf_filter,
-                "-c:v", "h264_nvenc", "-preset", "p4",
-                "-pix_fmt", "yuv420p", "-r", "30",
-                "-c:a", "aac", "-b:a", "192k",
-                "-shortest",
-                slideshow_video_temp
-            ]
-            subprocess.run(cmd_gpu, check=True)
-        else:
-            subprocess.run(cmd_cpu, check=True)
-    except Exception as e:
-        logging.warning(f"GPU NVENC falhou ({e}). Alternando para CPU ultra-rápida (libx264 -preset ultrafast)...")
-        subprocess.run(cmd_cpu, check=True)
-
-    # 4. Verifica existência da Intro do canal
+    # 4. Normaliza a Intro UMA ÚNICA VEZ para codificação idêntica
+    has_intro = False
     if os.path.exists(intro_path):
-        logging.info(f"Intro encontrada ({intro_path}). Concatenando Intro + Slideshow via filter_complex...")
-        cmd_concat = [
-            "ffmpeg", "-y",
-            "-i", intro_path,
-            "-i", slideshow_video_temp,
-            "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]",
-            "-map", "[v]", "-map", "[a]",
-            "-c:v", "libx264", "-preset", "ultrafast",
-            "-c:a", "aac", "-b:a", "192k",
-            final_output_path
+        logging.info("Normalizando Vinheta Intro para padrão idêntico de stream...")
+        cmd_intro = [
+            "ffmpeg", "-y", "-i", intro_path,
+            "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black",
+            "-r", "30", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+            intro_norm_temp
         ]
-        subprocess.run(cmd_concat, check=True)
-    else:
-        logging.warning(f"Intro não encontrada no caminho '{intro_path}'. Salvando slideshow diretamente...")
-        import shutil
-        shutil.move(slideshow_video_temp, final_output_path)
+        subprocess.run(cmd_intro, check=True)
+        has_intro = True
 
+    # 5. LOOP INSTANTÂNEO (-c copy) PARA ATINGIR +1 HORA DE DURAÇÃO TOTAL
+    import math
+    target_sec = target_min_hours * 3600.0
+    num_loops = math.ceil(target_sec / narration_duration)
+    total_dur_min = (narration_duration * num_loops) / 60.0
+
+    logging.info(f"⚡ Gerando vídeo longo de {total_dur_min:.1f} minutos ({num_loops}x loops) via concat -c copy...")
+    
+    concat_stream_list = os.path.join(temp_dir, "concat_stream.txt")
+    concat_lines = []
+    if has_intro and os.path.exists(intro_norm_temp):
+        concat_lines.append(f"file '{os.path.abspath(intro_norm_temp).replace('\\\\', '/')}'")
+    
+    slide_abs = os.path.abspath(slideshow_video_temp).replace("\\", "/")
+    for _ in range(num_loops):
+        concat_lines.append(f"file '{slide_abs}'")
+
+    with open(concat_stream_list, "w", encoding="utf-8") as f:
+        f.write("\n".join(concat_lines) + "\n")
+
+    cmd_fast_concat = [
+        "ffmpeg", "-y",
+        "-f", "concat", "-safe", "0",
+        "-i", concat_stream_list,
+        "-c", "copy",
+        final_output_path
+    ]
+    subprocess.run(cmd_fast_concat, check=True)
 
     # Limpeza dos arquivos temporários de renderização
-    import shutil
     try:
         shutil.rmtree(temp_dir)
     except: pass
 
-    logging.info(f"✨ Vídeo final concluído e salvo em: {final_output_path}")
+    logging.info(f"✨ Vídeo longo (+1h) finalizado com sucesso em: {final_output_path}")
     return final_output_path
