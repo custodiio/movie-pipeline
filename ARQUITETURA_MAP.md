@@ -47,11 +47,10 @@ Tabela `movies`:
     `Azure OpenAI -> Gemini (gemini-3.5-flash, gemini-3.1-pro-preview, gemini-3.1-flash-lite, gemini-2.5-pro) -> DeepSeek -> OpenAI`.
   - Fracionado em 4 chamadas/atos para maximizar extensão e riqueza narrativa.
 - **`src/omni_tts.py`**:
-  - Busca o áudio de clonagem de voz em `Movie-Pipeline/Assets/Clonagem/` (ou Drive).
-  - Síntese de voz em **2 blocos simultâneos** via `ThreadPoolExecutor` para dobrar a velocidade de narração nas portas OmniVoice (8001 e 8002).
+  - Módulo de síntese de voz paralela em 2 blocos utilizando os servidores OmniVoice (`http://127.0.0.1:8001/` e `http://127.0.0.1:8002/`) com o áudio de clonagem de referência em `Assets/Clonagem/`.
 - **`src/video_editor.py`**:
-  - Renderizador automatizado via FFmpeg.
-  - Adiciona Intro do canal (`intro.mp4`, toca 1 vez).
+  - Renderizador de vídeo no FFmpeg com aceleração por hardware GPU Nvidia NVENC (`h264_nvenc`) a 250+ FPS.
+  - Concatenação com a vinheta oficial `intro.mp4`.
   - Slideshow com imagens em loop e durações alternadas (3-5s).
   - Marca d'água animada estilo DVD bounce com opacidade 30% e fonte Bungee.
   - Salva em `output/<slug>.mp4`.
@@ -62,7 +61,7 @@ Tabela `movies`:
 - **`.github/workflows/run-notebook.yml`**:
   - Workflow automatizado do GitHub Actions que configura o Kaggle CLI, roda o `inject_secrets.py` e executa o `kaggle kernels push` com acelerador GPU Tesla T4.
 - **`notebooks/movie_pipeline_master.ipynb`**:
-  - Notebook mestre parametrizado contendo todas as células interativas totalmente preenchidas e prontas para execução no Kaggle/Colab.
+  - Notebook mestre parametrizado com Célula 1b dedicada à subida dos Servidores OmniVoice (GPU0 + GPU1) e renderização NVENC ultra-rápida.
 - **`main.py`**:
   - Orquestrador principal da aplicação na VPS. Invoca as funções de cada etapa do pipeline em sequência.
 
