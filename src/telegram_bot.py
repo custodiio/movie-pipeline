@@ -506,8 +506,8 @@ async def handle_receive_video(update: Update, context: ContextTypes.DEFAULT_TYP
                     source_chat_raw = parts[-2]
                     source_chat = int("-100" + source_chat_raw) if source_chat_raw.isdigit() else source_chat_raw
                     orig_msg = await client.get_messages(source_chat, ids=source_msg_id)
-                    if orig_msg and orig_msg.text:
-                        caption = orig_msg.text
+                    if orig_msg and (orig_msg.text or orig_msg.message):
+                        caption = orig_msg.text or orig_msg.message
                 await client.disconnect()
             except Exception as e:
                 logging.warning(f"Não foi possível extrair legenda via Telethon no preview: {e}")
