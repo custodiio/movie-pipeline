@@ -161,31 +161,33 @@ def generate_detailed_movie_script(movie_info: dict) -> str:
     
     system_prompt = (
         "Você é o narrador oficial de um canal premium de resumos e reviews detalhadas de cinema. "
-        "Sua linguagem deve ser envolvente, cinematográfica, bem articulada e altamente detalhada. "
+        "Sua missão é escrever um roteiro EXTREMAMENTE DETALHADO, MAJESTOSO E EXTENSO, descrevendo cena por cena com riqueza de detalhes, diálogos marcantes, contexto psicológico e tensão máxima. "
+        "Seja o mais longo e detalhado possível. Não economize palavras nem resuma nada de forma rasa. Escreva textos longos, profundos e extremamente minuciosos. "
         "Não use marcações de áudio como '[som de suspense]' ou '(música sobe)'. Escreva apenas o texto corrido a ser narrado."
     )
 
     logging.info(f"Iniciando geração de roteiro por IA para '{title}' através da cadeia de fallbacks...")
 
     # Parte 1: Introdução
-    p1 = f"Filme: {title} ({orig_title})\nGêneros: {genres}\nSinopse original: {overview}\n\nEscreva a PARTE 1 (Introdução envolvente, gancho inicial, contexto da história e apresentação dos protagonistas)."
+    p1 = f"Filme: {title} ({orig_title})\nGêneros: {genres}\nSinopse original: {overview}\n\nEscreva a PARTE 1 extremamente longa e minuciosa (Introdução envolvente, gancho inicial marcante, contexto profundo da história e apresentação completa dos protagonistas e do cenário)."
     part1 = generate_llm_text(p1, system_prompt)
     time.sleep(1)
 
     # Parte 2: Trama e Desenvolvimento
-    p2 = f"Filme: {title}\nContinuação da Parte 1:\n{part1[-400:]}\n\nEscreva a PARTE 2 (Desenvolvimento aprofundado da trama, arcos dos personagens e construção do conflito central)."
+    p2 = f"Filme: {title}\nContinuação da Parte 1:\n{part1[-400:]}\n\nEscreva a PARTE 2 extremamente longa e detalhada (Desenvolvimento aprofundado da trama, arcos dos personagens, segredos revelados e construção do conflito central cena por cena)."
     part2 = generate_llm_text(p2, system_prompt)
     time.sleep(1)
 
     # Parte 3: Clímax
-    p3 = f"Filme: {title}\nContinuação da Parte 2:\n{part2[-400:]}\n\nEscreva a PARTE 3 (Desenvolvimento do clímax, momentos de maior tensão/revelações e reviravoltas)."
+    p3 = f"Filme: {title}\nContinuação da Parte 2:\n{part2[-400:]}\n\nEscreva a PARTE 3 extremamente longa e intensa (Desenvolvimento do clímax, momentos de maior tensão, reviravoltas chocantes e sequências de impacto)."
     part3 = generate_llm_text(p3, system_prompt)
     time.sleep(1)
 
     # Parte 4: Desfecho e Veredito
-    p4 = f"Filme: {title}\nContinuação da Parte 3:\n{part3[-400:]}\n\nEscreva a PARTE 4 (Conclusão emocionante, resolução dos arcos, temas centrais e convite ao público)."
+    p4 = f"Filme: {title}\nContinuação da Parte 3:\n{part3[-400:]}\n\nEscreva a PARTE 4 extremamente completa (Conclusão emocionante, resolução de todos os arcos dos personagens, explicação das mensagens centrais e desfecho magistral)."
     part4 = generate_llm_text(p4, system_prompt)
 
     full_script = f"{part1}\n\n{part2}\n\n{part3}\n\n{part4}"
     logging.info(f"Roteiro completo gerado com sucesso para '{title}' ({len(full_script)} caracteres).")
     return full_script
+

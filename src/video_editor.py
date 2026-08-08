@@ -113,7 +113,8 @@ def build_slideshow_concat_script(images: list[str], target_duration: float, tem
     while current_time < target_duration:
         random.shuffle(img_pool)
         for img_path in img_pool:
-            dur = random.uniform(3.0, 5.0)
+            dur = random.uniform(5.0, 10.0)
+
             clean_path = os.path.abspath(img_path).replace("\\", "/")
             lines.append(f"file '{clean_path}'")
             lines.append(f"duration {dur:.2f}")

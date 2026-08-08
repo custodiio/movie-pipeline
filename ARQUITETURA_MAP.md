@@ -43,15 +43,15 @@ Tabela `movies`:
   - Gerencia o Google Drive (`Movie-Pipeline/Assets/` fixo e `Movie-Pipeline/Projetos/<slug>/`).
   - Executa limpeza de arquivos temporários de projetos anteriores, preservando `Assets/` (`intro.mp4` e `Clonagem/`).
 - **`src/script_generator.py`**:
-  - Solicita uma review/resumo extremamente detalhada por IA via cadeia estrita de fallbacks:
-    `Azure OpenAI -> Gemini (gemini-3.5-flash, gemini-3.1-pro-preview, gemini-3.1-flash-lite, gemini-2.5-pro) -> DeepSeek -> OpenAI`.
-  - Fracionado em 4 chamadas/atos para maximizar extensão e riqueza narrativa.
+  - Geração de roteiro/review cinematográfico ultra-detalhado e extenso em 4 partes através de IA.
+  - Prompts aprofundados exigindo riqueza de detalhes de cena por cena, motivações psicológicas, diálogos marcantes e texto muito mais longo.
+  - Cadeia estrita de fallbacks: Azure OpenAI (`gpt-5-mini`) -> Gemini (3.5-flash / 3.1-pro / 3.1-flash-lite / 2.5-pro) -> DeepSeek -> OpenAI (`gpt-5-mini`).
 - **`src/omni_tts.py`**:
   - Módulo de síntese de voz paralela em 2 blocos utilizando os servidores OmniVoice (`http://127.0.0.1:8001/` e `http://127.0.0.1:8002/`) com o áudio de clonagem de referência em `Assets/Clonagem/`.
 - **`src/video_editor.py`**:
   - Renderizador de vídeo no FFmpeg com aceleração por hardware GPU Nvidia NVENC (`h264_nvenc`) a 250+ FPS ou CPU ultra-rápida.
   - Concatenação com a vinheta oficial `intro.mp4`.
-  - Slideshow ultra-estável sem zoompan (durações de 3.5s a 5.0s por foto perfeitamente sincronizadas com a narração).
+  - Slideshow ultra-estável com durações de 5.0s a 10.0s por imagem perfeitamente sincronizadas com o áudio da narração.
   - Marca d'água animada estilo DVD bounce legível e lenta (12s por movimento) com opacidade 30% e fonte Bungee.
   - Repetição instantânea em modo stream (`-c copy`) até atingir a duração exata do título cadastrada no TXT (`DURACAO_MIN`).
   - Salva em `output/<slug>.mp4`.
