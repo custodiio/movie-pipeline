@@ -157,8 +157,9 @@ def render_movie_video(
 
     ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
     
-    # 4. FILTRO DE VÍDEO COM ANIMAÇÃO DIVERSIFICADA (Zoom In/Out + Pan Esquerda/Direita) EM TODAS AS IMAGENS!
+    # 4. FILTRO DE VÍDEO COM ANIMAÇÃO DIVERSIFICADA (fps=30 expande a imagem antes do zoompan!)
     zoompan_filter = (
+        "fps=30,"
         "scale=1920:1080:force_original_aspect_ratio=decrease,"
         "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,"
         "zoompan=z='if(lte(mod(on,300),150), 1.0+0.002*mod(on,150), 1.3-0.002*mod(on,150))':"
@@ -168,6 +169,7 @@ def render_movie_video(
         f"ass='{ass_path_escaped}'"
     )
     vf_filter = "".join(zoompan_filter)
+
 
     # Renderiza o bloco principal do filme com áudio 44100Hz 2ch
     cmd_slideshow = [
