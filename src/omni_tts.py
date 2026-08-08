@@ -69,15 +69,22 @@ def synthesize_audio_block(block_idx: int, text: str, ref_audio_path: str, outpu
             client = Client(f"http://127.0.0.1:{omnivoice_port}/")
             logging.info(f"[Bloco {block_idx}] Enviando requisição de clonagem para o OmniVoice (Porta {omnivoice_port})...")
             res = client.predict(
-                ref_audio=handle_file(ref_audio_path),
-                gen_text=text,
-                api_name="/generate_audio"
+                text=text,
+                lang="Portuguese",
+                ref_aud=handle_file(ref_audio_path),
+                ref_text="",
+                instruct="male, young adult",
+                ns=32.0, gs=2.0, dn=True, sp=1.0, du=0.0,
+                pp=True, po=True,
+                api_name="/_clone_fn"
             )
-            if res and os.path.exists(res):
-                sound = AudioSegment.from_file(res)
+            res_path = res[0] if isinstance(res, (list, tuple)) else res
+            if res_path and os.path.exists(res_path):
+                sound = AudioSegment.from_file(res_path)
                 sound.export(out_file, format="wav")
                 logging.info(f"[Bloco {block_idx}] Síntese OmniVoice concluída com sucesso!")
                 return out_file
+
         except Exception as e:
             logging.warning(f"[Bloco {block_idx}] OmniVoice (Porta {omnivoice_port}) não respondeu ({e}). Usando fallback TTS...")
 
