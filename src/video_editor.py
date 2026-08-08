@@ -157,7 +157,7 @@ def render_movie_video(
     generate_dvd_bounce_ass(ass_path, narration_duration)
 
     # 2. Gera a lista de slideshow
-    concat_txt = build_slideshow_concat_script(images, narration_duration, temp_dir)
+    concat_txt_path = build_slideshow_concat_script(images, narration_duration, temp_dir)
 
     # 3. Comando FFmpeg para montar a parte de slideshow (com zoompan e marca d'água .ass)
     ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
@@ -165,27 +165,37 @@ def render_movie_video(
     # Filtro de vídeo: slideshow + pad 16:9 + ass watermark
     vf_filter = f"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,ass='{ass_path_escaped}'"
     
-    # Detecta GPU Nvidia NVENC para velocidade ultra-rápida (5x a 10x)
-    has_nvenc = shutil.which("nvidia-smi") is not None
-    codec_video = "h264_nvenc" if has_nvenc else "libx264"
-    preset_opts = ["-preset", "p4"] if has_nvenc else []
-
-    logging.info(f"Renderizando vídeo final com encoder: {codec_video} (Aceleração GPU: {has_nvenc})...")
-
-    cmd_slideshow = [
+    cmd_cpu = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0", "-i", concat_txt_path,
         "-i", voiceover_path,
         "-vf", vf_filter,
-        "-c:v", codec_video
-    ] + preset_opts + [
+        "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
         "-pix_fmt", "yuv420p", "-r", "30",
         "-c:a", "aac", "-b:a", "192k",
         "-shortest",
         slideshow_video_temp
     ]
 
-    subprocess.run(cmd_slideshow, check=True)
+    try:
+        if shutil.which("nvidia-smi"):
+            cmd_gpu = [
+                "ffmpeg", "-y",
+                "-f", "concat", "-safe", "0", "-i", concat_txt_path,
+                "-i", voiceover_path,
+                "-vf", vf_filter,
+                "-c:v", "h264_nvenc", "-preset", "p4",
+                "-pix_fmt", "yuv420p", "-r", "30",
+                "-c:a", "aac", "-b:a", "192k",
+                "-shortest",
+                slideshow_video_temp
+            ]
+            subprocess.run(cmd_gpu, check=True)
+        else:
+            subprocess.run(cmd_cpu, check=True)
+    except Exception as e:
+        logging.warning(f"GPU NVENC falhou ({e}). Alternando para CPU ultra-rápida (libx264 -preset ultrafast)...")
+        subprocess.run(cmd_cpu, check=True)
 
     # 4. Verifica existência da Intro do canal
     if os.path.exists(intro_path):
