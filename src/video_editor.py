@@ -187,13 +187,14 @@ def render_movie_video(
         subprocess.run(cmd_intro, check=True)
         has_intro = True
 
-    # 5. LOOP INSTANTÂNEO (-c copy) PARA ATINGIR +1 HORA DE DURAÇÃO TOTAL
+    # 5. LOOP INSTANTÂNEO (-c copy) PARA CORRESPONDER À DURAÇÃO EXATA DO TÍTULO (Ex: 164 min)
     import math
-    target_sec = target_min_hours * 3600.0
+    target_sec = target_min_hours * 3600.0 if target_min_hours > 5.0 else target_min_hours * 60.0
     num_loops = math.ceil(target_sec / narration_duration)
     total_dur_min = (narration_duration * num_loops) / 60.0
 
-    logging.info(f"⚡ Gerando vídeo longo de {total_dur_min:.1f} minutos ({num_loops}x loops) via concat -c copy...")
+    logging.info(f"⚡ Gerando vídeo de {total_dur_min:.1f} minutos ({num_loops}x repetições de {narration_duration/60:.1f}min) para bater a duração do título ({target_sec/60:.0f} min) via concat -c copy...")
+
     
     concat_stream_list = os.path.join(temp_dir, "concat_stream.txt")
     concat_lines = []
