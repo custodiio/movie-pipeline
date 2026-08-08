@@ -64,7 +64,7 @@ def build_sales_link(movie_title: str = None) -> str:
 STATE_SEARCH_MOVIE, STATE_SELECT_MOVIE, STATE_SELECT_IMAGES, STATE_PREVIEW_POST, STATE_EDIT_COPY = range(5)
 
 # Estados da Conversa para Postar Vídeo no Canal VIP
-STATE_RECEIVE_VIDEO, STATE_CONFIRM_VIDEO_TITLE = range(5, 7)
+STATE_RECEIVE_VIDEO, STATE_CONFIRM_VIDEO_TITLE, STATE_EDIT_VIP_TITLE = range(5, 8)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -478,13 +478,35 @@ async def handle_receive_video(update: Update, context: ContextTypes.DEFAULT_TYP
     msg_text = update.message.text or ""
     
     context.user_data["vip_message_obj"] = update.message
+    caption = ""
     
     if video:
         context.user_data["vip_video_file_id"] = video.file_id
         caption = update.message.caption or ""
     elif "t.me/" in msg_text:
-        context.user_data["vip_video_link"] = msg_text.strip()
-        caption = ""
+        link_str = msg_text.strip()
+        context.user_data["vip_video_link"] = link_str
+        
+        # Tenta obter a legenda/texto da mensagem original via Telethon em tempo real
+        api_id = os.getenv("TELEGRAM_API_ID")
+        api_hash = os.getenv("TELEGRAM_API_HASH")
+        sess_path = os.getenv("TELEGRAM_SESSION_PATH", "d:/Applications/DailymotionAgent/dailymotion_agent.session")
+        if api_id and api_hash and os.path.exists(sess_path):
+            try:
+                from telethon import TelegramClient
+                client = TelegramClient(sess_path, int(api_id), api_hash)
+                await client.connect()
+                if await client.is_user_authorized():
+                    parts = link_str.split('/')
+                    source_msg_id = int(parts[-1])
+                    source_chat_raw = parts[-2]
+                    source_chat = int("-100" + source_chat_raw) if source_chat_raw.isdigit() else source_chat_raw
+                    orig_msg = await client.get_messages(source_chat, ids=source_msg_id)
+                    if orig_msg and orig_msg.text:
+                        caption = orig_msg.text
+                await client.disconnect()
+            except Exception as e:
+                logging.warning(f"Não foi possível extrair legenda via Telethon no preview: {e}")
     else:
         await update.message.reply_text("❌ Por favor, envie um **vídeo válido**, **mensagem encaminhada** ou **link da mensagem** no Telegram.")
         return STATE_RECEIVE_VIDEO
@@ -499,12 +521,39 @@ async def handle_receive_video(update: Update, context: ContextTypes.DEFAULT_TYP
 
     await update.message.reply_text(
         f"📹 **Vídeo / Link Recebido!**\n\n"
-        f"Legenda atual: _{caption if caption else '(Sem legenda / Usar original)'}_\n\n"
+        f"Legenda detectada:\n_{caption if caption else '(Sem legenda / Usar formato do post)'}_\n\n"
         f"Escolha o que deseja fazer:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
     return STATE_CONFIRM_VIDEO_TITLE
+
+async def handle_edit_vip_title_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Pede para o usuário enviar a nova legenda/título para o vídeo no VIP."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text("✏️ **Envie o novo texto/legenda para a postagem no Canal VIP:**", parse_mode="Markdown")
+    return STATE_EDIT_VIP_TITLE
+
+async def handle_edit_vip_title_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe a legenda editada e mostra o botão de confirmação."""
+    new_caption = update.message.text.strip()
+    context.user_data["vip_video_caption"] = new_caption
+
+    keyboard = [
+        [InlineKeyboardButton("🚀 Publicar Agora no Canal VIP", callback_data="keep_vip_title")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
+    ]
+
+    await update.message.reply_text(
+        f"📹 **Legenda Atualizada!**\n\n"
+        f"Nova legenda:\n_{new_caption}_\n\n"
+        f"Clique abaixo para publicar no Canal VIP:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown"
+    )
+    return STATE_CONFIRM_VIDEO_TITLE
+
 
 async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Envia o vídeo para o Canal VIP em tela cheia via Telethon instantâneo."""
@@ -628,8 +677,10 @@ def create_telegram_bot_app() -> Application:
             STATE_RECEIVE_VIDEO: [MessageHandler(filters.ALL & ~filters.COMMAND, handle_receive_video)],
             STATE_CONFIRM_VIDEO_TITLE: [
                 CallbackQueryHandler(handle_publish_vip_video, pattern="^keep_vip_title$"),
+                CallbackQueryHandler(handle_edit_vip_title_start, pattern="^edit_vip_title$"),
                 CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^cancel_post$")
-            ]
+            ],
+            STATE_EDIT_VIP_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_vip_title_receive)]
         },
         fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
         per_message=False
