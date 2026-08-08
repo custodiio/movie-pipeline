@@ -199,26 +199,23 @@ def render_movie_video(
 
     # 4. Verifica existência da Intro do canal
     if os.path.exists(intro_path):
-        logging.info(f"Intro encontrada ({intro_path}). Concatenando Intro + Slideshow...")
-        # Re-encode intro & slideshow para garantir mesmo codec/resolução
-        concat_list_file = os.path.join(temp_dir, "final_concat.txt")
-        intro_clean = os.path.abspath(intro_path).replace("\\", "/")
-        slide_clean = os.path.abspath(slideshow_video_temp).replace("\\", "/")
-        
-        with open(concat_list_file, "w", encoding="utf-8") as f:
-            f.write(f"file '{intro_clean}'\nfile '{slide_clean}'\n")
-            
-        cmd_final = [
+        logging.info(f"Intro encontrada ({intro_path}). Concatenando Intro + Slideshow via filter_complex...")
+        cmd_concat = [
             "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0", "-i", concat_list_file,
-            "-c", "copy",
+            "-i", intro_path,
+            "-i", slideshow_video_temp,
+            "-filter_complex", "[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]",
+            "-map", "[v]", "-map", "[a]",
+            "-c:v", "libx264", "-preset", "ultrafast",
+            "-c:a", "aac", "-b:a", "192k",
             final_output_path
         ]
-        subprocess.run(cmd_final, check=True)
+        subprocess.run(cmd_concat, check=True)
     else:
         logging.warning(f"Intro não encontrada no caminho '{intro_path}'. Salvando slideshow diretamente...")
         import shutil
         shutil.move(slideshow_video_temp, final_output_path)
+
 
     # Limpeza dos arquivos temporários de renderização
     import shutil
