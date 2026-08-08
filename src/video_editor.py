@@ -86,11 +86,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         t_start_str = format_time(t)
         t_end_str = format_time(t_end)
         
+        # Tag \\move deve ficar no início do evento ASS uma única vez
         move_tag = f"\\move({p1[0]},{p1[1]},{p2[0]},{p2[1]})"
-        
-        # Texto principal
-        line_main = f"Dialogue: 0,{t_start_str},{t_end_str},DVDBounce,,0,0,0,,{{{move_tag}}}{WATERMARK_TEXT_MAIN}\\N{{{move_tag}}}{WATERMARK_TEXT_SUB}"
+        line_main = f"Dialogue: 0,{t_start_str},{t_end_str},DVDBounce,,0,0,0,,{{{move_tag}}}{WATERMARK_TEXT_MAIN}\\N{WATERMARK_TEXT_SUB}"
         events.append(line_main)
+
         
         t = t_end
         pos_idx += 1
