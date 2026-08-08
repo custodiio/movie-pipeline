@@ -43,13 +43,22 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@dramasleh")
 TELEGRAM_VIP_CHANNEL_ID = os.getenv("TELEGRAM_VIP_CHANNEL_ID", "@telacheiafilmesvip")
-TELEGRAM_SALES_PHONE = os.getenv("TELEGRAM_SALES_PHONE", "5564992430964")
-TELEGRAM_SALES_LINK = os.getenv("TELEGRAM_SALES_LINK", "https://t.me/+5564992430964")
+TELEGRAM_SALES_USERNAME = os.getenv("TELEGRAM_SALES_USERNAME", "leh_lurdes").replace("@", "")
 
 def build_sales_link(movie_title: str = None) -> str:
-    """Gera o link de vendas direcionando em 1 clique para o seu chat privado do Telegram."""
-    link = os.getenv("TELEGRAM_SALES_LINK", "https://t.me/+5564992430964")
-    return link
+    """
+    Gera o link de vendas do Telegram (https://t.me/leh_lurdes?text=...).
+    Usa quote_plus para garantir que os espaços apareçam perfeitamente limpos como espaços em branco,
+    sem exibir o código '%20' impresso na mensagem.
+    """
+    username = os.getenv("TELEGRAM_SALES_USERNAME", "leh_lurdes").replace("@", "")
+    if movie_title:
+        msg = f"Olá, gostaria de solicitar o acesso ao filme do {movie_title.title()}!"
+    else:
+        msg = "Olá, gostaria de solicitar o acesso ao filme!"
+    
+    encoded_text = urllib.parse.quote_plus(msg)
+    return f"https://t.me/{username}?text={encoded_text}"
 
 # Estados da Conversa para Criar Postagem no Canal Público
 STATE_SEARCH_MOVIE, STATE_SELECT_MOVIE, STATE_SELECT_IMAGES, STATE_PREVIEW_POST, STATE_EDIT_COPY = range(5)
