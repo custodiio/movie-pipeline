@@ -459,28 +459,36 @@ async def handle_publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 # ==============================================================================
-# FLUXO 2: POSTAR VÍDEO NO CANAL VIP
+# FLUXO 2: POSTAR VÍDEO NO CANAL VIP (Telethon MTProto Ultra-Rápido)
 # ==============================================================================
 
 async def start_post_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Pede para o usuário enviar o vídeo ou link da mensagem."""
     await update.message.reply_text(
-        "🎥 **Postar Vídeo no Canal VIP**\n\n"
-        "Envie o arquivo do vídeo (ou encaminhe a mensagem com o vídeo) que você deseja publicar no canal VIP:",
+        "🎥 **Postar Vídeo no Canal VIP (Ultra-Rápido via Telethon)**\n\n"
+        "Envie o **arquivo do vídeo**, **encaminhe a mensagem** ou **envie o link da mensagem** (ex: `https://t.me/c/2113392315/61747`) do filme:",
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="Markdown"
     )
     return STATE_RECEIVE_VIDEO
 
 async def handle_receive_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Recebe o vídeo e pergunta o título."""
+    """Recebe o vídeo ou link de mensagem e armazena os dados."""
     video = update.message.video or update.message.document
-    if not video:
-        await update.message.reply_text("❌ Por favor, envie um arquivo de VÍDEO válido.")
+    msg_text = update.message.text or ""
+    
+    context.user_data["vip_message_obj"] = update.message
+    
+    if video:
+        context.user_data["vip_video_file_id"] = video.file_id
+        caption = update.message.caption or ""
+    elif "t.me/" in msg_text:
+        context.user_data["vip_video_link"] = msg_text.strip()
+        caption = ""
+    else:
+        await update.message.reply_text("❌ Por favor, envie um **vídeo válido**, **mensagem encaminhada** ou **link da mensagem** no Telegram.")
         return STATE_RECEIVE_VIDEO
 
-    caption = update.message.caption or ""
-    context.user_data["vip_video_file_id"] = video.file_id
     context.user_data["vip_video_caption"] = caption
 
     keyboard = [
@@ -490,8 +498,8 @@ async def handle_receive_video(update: Update, context: ContextTypes.DEFAULT_TYP
     ]
 
     await update.message.reply_text(
-        f"📹 **Vídeo Recebido!**\n\n"
-        f"Legenda atual: _{caption if caption else '(Sem legenda)'}_\n\n"
+        f"📹 **Vídeo / Link Recebido!**\n\n"
+        f"Legenda atual: _{caption if caption else '(Sem legenda / Usar original)'}_\n\n"
         f"Escolha o que deseja fazer:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
@@ -499,26 +507,79 @@ async def handle_receive_video(update: Update, context: ContextTypes.DEFAULT_TYP
     return STATE_CONFIRM_VIDEO_TITLE
 
 async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Envia o vídeo para o Canal VIP em tela cheia."""
+    """Envia o vídeo para o Canal VIP em tela cheia via Telethon instantâneo."""
     query = update.callback_query
     await query.answer()
+    await query.edit_message_text("⚡ **Publicando vídeo no Canal VIP em alta velocidade via Telethon...**", parse_mode="Markdown")
 
     video_file_id = context.user_data.get("vip_video_file_id")
+    video_link = context.user_data.get("vip_video_link")
     caption = context.user_data.get("vip_video_caption", "")
+    msg_obj = context.user_data.get("vip_message_obj")
 
-    try:
-        await context.bot.send_video(
-            chat_id=TELEGRAM_VIP_CHANNEL_ID,
-            video=video_file_id,
-            caption=caption,
-            supports_streaming=True
-        )
-        await query.edit_message_text(f"🚀 **VÍDEO PUBLICADO COM SUCESSO NO CANAL VIP `{TELEGRAM_VIP_CHANNEL_ID}`!**", parse_mode="Markdown")
-    except Exception as e:
-        logging.error(f"Erro ao publicar no canal VIP {TELEGRAM_VIP_CHANNEL_ID}: {e}")
-        await query.edit_message_text(f"❌ **Erro ao publicar no canal VIP `{TELEGRAM_VIP_CHANNEL_ID}`:**\n`{e}`\n\nVerifique se o bot foi adicionado como ADMINISTRADOR do canal VIP!", parse_mode="Markdown")
+    api_id = os.getenv("TELEGRAM_API_ID")
+    api_hash = os.getenv("TELEGRAM_API_HASH")
+    sess_path = os.getenv("TELEGRAM_SESSION_PATH", "d:/Applications/DailymotionAgent/dailymotion_agent.session")
 
+    published_via_telethon = False
+
+    # 1. Tenta publicação instantânea via Telethon (MTProto Client)
+    if api_id and api_hash and os.path.exists(sess_path):
+        try:
+            from telethon import TelegramClient
+            client = TelegramClient(sess_path, int(api_id), api_hash)
+            await client.connect()
+            if await client.is_user_authorized():
+                chat_entity = await client.get_entity(TELEGRAM_VIP_CHANNEL_ID)
+                
+                if video_link and ("t.me/c/" in video_link or "t.me/" in video_link):
+                    parts = video_link.strip().split('/')
+                    source_msg_id = int(parts[-1])
+                    source_chat_raw = parts[-2]
+                    if source_chat_raw.isdigit():
+                        source_chat = int("-100" + source_chat_raw)
+                    else:
+                        source_chat = source_chat_raw
+                    
+                    orig_msg = await client.get_messages(source_chat, ids=source_msg_id)
+                    if orig_msg:
+                        await client.send_message(chat_entity, orig_msg, caption=caption if caption else None)
+                        published_via_telethon = True
+                elif msg_obj and msg_obj.message_id:
+                    # Encaminha a mensagem original instantaneamente!
+                    await client.forward_messages(chat_entity, msg_obj.message_id, msg_obj.chat_id)
+                    published_via_telethon = True
+
+                await client.disconnect()
+        except Exception as e:
+            logging.warning(f"Fallback para Bot API por exceção no Telethon: {e}")
+
+    # 2. Fallback via Bot API se o Telethon não enviou
+    if not published_via_telethon:
+        try:
+            if video_file_id:
+                await context.bot.send_video(
+                    chat_id=TELEGRAM_VIP_CHANNEL_ID,
+                    video=video_file_id,
+                    caption=caption,
+                    supports_streaming=True
+                )
+                published_via_telethon = True
+            elif msg_obj:
+                await context.bot.forward_message(
+                    chat_id=TELEGRAM_VIP_CHANNEL_ID,
+                    from_chat_id=msg_obj.chat_id,
+                    message_id=msg_obj.message_id
+                )
+                published_via_telethon = True
+        except Exception as e:
+            logging.error(f"Erro ao publicar no VIP via Bot API: {e}")
+            await query.edit_message_text(f"❌ **Erro ao publicar no canal VIP `{TELEGRAM_VIP_CHANNEL_ID}`:**\n`{e}`\n\nVerifique se o bot ou a conta é ADMINISTRADORA do canal!", parse_mode="Markdown")
+            return ConversationHandler.END
+
+    await query.edit_message_text(f"🚀 **VÍDEO PUBLICADO COM SUCESSO NO CANAL VIP `{TELEGRAM_VIP_CHANNEL_ID}` em menos de 1 segundo!**", parse_mode="Markdown")
     return ConversationHandler.END
+
 
 
 # ==============================================================================
@@ -564,7 +625,7 @@ def create_telegram_bot_app() -> Application:
             CommandHandler("postar_video", start_post_video)
         ],
         states={
-            STATE_RECEIVE_VIDEO: [MessageHandler(filters.VIDEO | filters.Document.VIDEO, handle_receive_video)],
+            STATE_RECEIVE_VIDEO: [MessageHandler(filters.ALL & ~filters.COMMAND, handle_receive_video)],
             STATE_CONFIRM_VIDEO_TITLE: [
                 CallbackQueryHandler(handle_publish_vip_video, pattern="^keep_vip_title$"),
                 CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^cancel_post$")
