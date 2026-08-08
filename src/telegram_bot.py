@@ -47,19 +47,9 @@ TELEGRAM_SALES_PHONE = os.getenv("TELEGRAM_SALES_PHONE", "5564992430964")
 TELEGRAM_SALES_LINK = os.getenv("TELEGRAM_SALES_LINK", "https://t.me/+5564992430964")
 
 def build_sales_link(movie_title: str = None) -> str:
-    """
-    Gera o link de compartilhamento oficial do Telegram com a mensagem de saudação pronta.
-    Abre o app do Telegram permitindo enviar a mensagem preenchida diretamente para o seu contato.
-    """
-    target_link = os.getenv("TELEGRAM_SALES_LINK", "https://t.me/+5564992430964")
-    if movie_title:
-        msg = f"Olá! Tenho interesse no filme '{movie_title.upper()}' e gostaria do acesso ao Canal VIP!"
-    else:
-        msg = "Olá! Tenho interesse e gostaria do acesso ao Canal VIP de filmes!"
-    
-    encoded_text = urllib.parse.quote(msg)
-    encoded_url = urllib.parse.quote(target_link)
-    return f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
+    """Gera o link de vendas direcionando em 1 clique para o seu chat privado do Telegram."""
+    link = os.getenv("TELEGRAM_SALES_LINK", "https://t.me/+5564992430964")
+    return link
 
 # Estados da Conversa para Criar Postagem no Canal Público
 STATE_SEARCH_MOVIE, STATE_SELECT_MOVIE, STATE_SELECT_IMAGES, STATE_PREVIEW_POST, STATE_EDIT_COPY = range(5)
@@ -468,7 +458,8 @@ def create_telegram_bot_app() -> Application:
             ],
             STATE_EDIT_COPY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_copy_receive)]
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)]
+        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        per_message=False
     )
 
     # ConversationHandler para Postar Vídeo no Canal VIP
@@ -484,7 +475,8 @@ def create_telegram_bot_app() -> Application:
                 CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^cancel_post$")
             ]
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)]
+        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        per_message=False
     )
 
     app.add_handler(CommandHandler("start", start_command))
