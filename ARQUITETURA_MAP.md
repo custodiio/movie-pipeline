@@ -65,6 +65,12 @@ Tabela `movies`:
   - Workflow automatizado do GitHub Actions que configura o Kaggle CLI, roda o `inject_secrets.py` e executa o `kaggle kernels push` com acelerador GPU Tesla T4.
 - **`notebooks/movie_pipeline_master.ipynb`**:
   - Notebook mestre parametrizado com Célula 1b dedicada à subida dos Servidores OmniVoice (GPU0 + GPU1) e renderização NVENC ultra-rápida.
+- **`src/telegram_bot.py`**:
+  - Módulo assíncrono do Bot do Telegram para automação de vendas e postagens.
+  - **Fluxo 1 (Canal Público `@dramasleh`)**: Busca filmes no TMDB por nome, seleciona até 2 pôsteres em alta resolução, gera Copy de Vendas persuasiva por IA (cadeia de fallbacks) com botão Inline `🔒 Solicitar Acesso (R$ 5,00)` e envia com preview e confirmação para o admin.
+  - **Fluxo 2 (Canal VIP)**: Recebe vídeos e publica em tela cheia diretamente no canal VIP (`TELEGRAM_VIP_CHANNEL_ID`).
+- **`run_bot.py`**:
+  - Script principal na raiz para inicialização e execução contínua do Bot do Telegram em segundo plano.
 - **`main.py`**:
   - Orquestrador principal da aplicação na VPS. Invoca as funções de cada etapa do pipeline em sequência.
 

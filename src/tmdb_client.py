@@ -43,3 +43,20 @@ def get_movie_details(movie_id: int, language="pt-BR"):
     response = requests.get(url, headers=get_headers(), params=params)
     response.raise_for_status()
     return response.json()
+
+def search_movies(query: str, language: str = "pt-BR") -> list[dict]:
+    """Busca filmes pelo nome/query na API do TMDB."""
+    if not TMDB_API_KEY:
+        raise ValueError("TMDB_API_KEY não encontrada no arquivo .env")
+        
+    url = f"{BASE_URL}/search/movie"
+    params = {
+        "api_key": TMDB_API_KEY,
+        "query": query,
+        "language": language
+    }
+    
+    response = requests.get(url, headers=get_headers(), params=params)
+    response.raise_for_status()
+    data = response.json()
+    return data.get("results", [])
