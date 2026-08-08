@@ -53,8 +53,7 @@ Tabela `movies`:
   - Concatenação com a vinheta oficial `intro.mp4`.
   - Slideshow ultra-estável com durações de 5.0s a 10.0s por imagem perfeitamente sincronizadas com o áudio da narração.
   - Marca d'água animada estilo DVD bounce com `\move` ASS legível, gigante (65pt Bungee) e lenta (12s por travessia), com coordenadas e milissegundos explícitos `\move(x1,y1,x2,y2,0,12000)`.
-  - Renderização modular em 3 etapas exatas (Passo 1: Concatena slideshow base puro de fotos sem legenda/áudio; Passo 2: Monta a estrutura final do filme via stream concat sem legenda; Passo 3: Aplicação final contínua em 1 única passada do áudio + marca d'água ASS Bungee 65pt).
-  - Repetição instantânea em modo stream (`-c copy`) até atingir a duração exata do título cadastrada no TXT (`DURACAO_MIN`).
+  - Renderização otimizada em 3 etapas ultra-rápidas (Passo 1: Concatena slideshow base puro de fotos para o tempo da narração; Passo 2: Renderiza e queima a legenda ASS 65pt + áudio da narração no bloco do filme em 1 única passada; Passo 3: Concatena vinheta intro + repetições do bloco queimado via stream copy `-c copy` instantâneo em 2 segundos para atingir a duração total do TXT).
   - Salva em `output/<slug>.mp4`.
 
 

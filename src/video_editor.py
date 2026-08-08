@@ -142,15 +142,15 @@ def render_movie_video(
 
     final_output_path = os.path.join(output_dir, f"{slug}.mp4")
     slideshow_base_temp = os.path.join(temp_dir, "slideshow_base.mp4")
+    bloco_queimado_temp = os.path.join(temp_dir, "bloco_queimado.mp4")
     intro_norm_temp = os.path.join(temp_dir, "intro_norm.mp4")
-    video_sem_legenda_temp = os.path.join(temp_dir, "video_sem_legenda.mp4")
     ass_path = os.path.join(temp_dir, "watermark.ass")
 
     # 1. Duração do áudio da narração
     audio_seg = AudioSegment.from_file(voiceover_path)
     narration_duration = len(audio_seg) / 1000.0
 
-    # 2. PASSO 1: Monta o Slideshow de Imagens sem áudio e sem legenda
+    # 2. PASSO 1: Gera a base visual do slideshow de imagens sem áudio/legenda para a duração da narração
     concat_txt_path = build_slideshow_concat_script(images, narration_duration, temp_dir)
     vf_scale = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black"
     cmd_base = [
@@ -161,17 +161,37 @@ def render_movie_video(
         "-pix_fmt", "yuv420p", "-r", "30", "-an",
         slideshow_base_temp
     ]
-    logging.info(f"🎥 1/3 Renderizando base visual do slideshow ({narration_duration:.1f}s)...")
+    logging.info(f"🎥 1/3 Renderizando base de fotos ({narration_duration:.1f}s = {narration_duration/60:.1f}min)...")
     subprocess.run(cmd_base, check=True)
 
-    # 3. PASSO 2: Normaliza a Intro e monta o vídeo completo sem áudio/legenda para a duração total do título
+    # 3. PASSO 2: Gera a legenda ASS e RENDERIZA O BLOCO DA NARRAÇÃO QUEIMANDO ÁUDIO + LEGENDA BUNGEE 65pt EM UMA ÚNICA PASSADA
+    generate_dvd_bounce_ass(ass_path, narration_duration + 10.0)
+    ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
+    vf_ass = f"ass='{ass_path_escaped}'"
+
+    cmd_queima = [
+        "ffmpeg", "-y",
+        "-i", slideshow_base_temp,
+        "-i", voiceover_path,
+        "-vf", vf_ass,
+        "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
+        "-pix_fmt", "yuv420p",
+        "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
+        "-shortest",
+        bloco_queimado_temp
+    ]
+    logging.info(f"🎨 2/3 Renderizando bloco do filme com Marca D'Água Animada Bungee (65pt) + Áudio em passada única contínua...")
+    subprocess.run(cmd_queima, check=True)
+
+    # 4. PASSO 3: Normaliza Intro e faz a Concatenação Ultra-Rápida (-c copy em segundos!) para a duração exata do filme no TXT
     has_intro = False
     if os.path.exists(intro_path):
         logging.info("Normalizando Vinheta Intro...")
         cmd_intro = [
             "ffmpeg", "-y", "-i", intro_path,
             "-vf", "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black",
-            "-r", "30", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", "-an",
+            "-r", "30", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
             intro_norm_temp
         ]
         subprocess.run(cmd_intro, check=True)
@@ -179,17 +199,18 @@ def render_movie_video(
 
     target_sec = target_min_hours * 3600.0 if target_min_hours > 5.0 else target_min_hours * 60.0
     num_loops = math.ceil(target_sec / narration_duration)
-    total_dur_sec = narration_duration * num_loops
+    total_dur_min = (narration_duration * num_loops) / 60.0
 
-    logging.info(f"⚡ 2/3 Montando estrutura visual de {total_dur_sec/60:.1f} min ({num_loops}x repetições)...")
+    logging.info(f"⚡ 3/3 Gerando vídeo longo de {total_dur_min:.1f} min ({num_loops}x repetições de {narration_duration/60:.1f}min) via concat -c copy instantâneo...")
+
     concat_stream_list = os.path.join(temp_dir, "concat_stream.txt")
     concat_lines = []
     if has_intro and os.path.exists(intro_norm_temp):
         concat_lines.append(f"file '{os.path.abspath(intro_norm_temp).replace('\\\\', '/')}'")
     
-    slide_abs = os.path.abspath(slideshow_base_temp).replace("\\", "/")
+    bloco_abs = os.path.abspath(bloco_queimado_temp).replace("\\", "/")
     for _ in range(num_loops):
-        concat_lines.append(f"file '{slide_abs}'")
+        concat_lines.append(f"file '{bloco_abs}'")
 
     with open(concat_stream_list, "w", encoding="utf-8") as f:
         f.write("\n".join(concat_lines) + "\n")
@@ -199,28 +220,9 @@ def render_movie_video(
         "-f", "concat", "-safe", "0",
         "-i", concat_stream_list,
         "-c", "copy",
-        video_sem_legenda_temp
-    ]
-    subprocess.run(cmd_fast_concat, check=True)
-
-    # 4. PASSO 3: Gera o .ass para o tempo total e realiza a RENDERIZAÇÃO FINAL ÚNICA (ÁUDIO + MARCA D'ÁGUA ASS GRANDE)
-    generate_dvd_bounce_ass(ass_path, total_dur_sec + 60.0)
-    ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
-    vf_ass = f"ass='{ass_path_escaped}'"
-
-    cmd_final = [
-        "ffmpeg", "-y",
-        "-i", video_sem_legenda_temp,
-        "-stream_loop", "-1", "-i", voiceover_path,
-        "-vf", vf_ass,
-        "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
-        "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
-        "-shortest",
         final_output_path
     ]
-    logging.info(f"🎨 3/3 Renderização Final com Marca D'Água Animada Bungee (65pt) + Áudio da Narração em passada contínua...")
-    subprocess.run(cmd_final, check=True)
+    subprocess.run(cmd_fast_concat, check=True)
 
 
     # 4. Normaliza a Intro UMA ÚNICA VEZ para codificação idêntica
