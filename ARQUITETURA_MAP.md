@@ -51,10 +51,11 @@ Tabela `movies`:
 - **`src/video_editor.py`**:
   - Renderizador de vídeo no FFmpeg com aceleração por hardware GPU Nvidia NVENC (`h264_nvenc`) a 250+ FPS ou CPU ultra-rápida.
   - Concatenação com a vinheta oficial `intro.mp4`.
-  - Slideshow com movimento dinâmico contínuo e diversificado de Zoom (In/Out) e Pan (Esquerda/Direita) em 100% das imagens via filtro `zoompan`.
-  - Marca d'água animada estilo DVD bounce com opacidade 30% e fonte Bungee utilizando arquivo de legenda ASS estático pré-calculado de 30 minutos (ultraleve).
+  - Slideshow ultra-estável sem zoompan (durações de 3.5s a 5.0s por foto perfeitamente sincronizadas com a narração).
+  - Marca d'água animada estilo DVD bounce legível e lenta (12s por movimento) com opacidade 30% e fonte Bungee.
   - Repetição instantânea em modo stream (`-c copy`) até atingir a duração exata do título cadastrada no TXT (`DURACAO_MIN`).
   - Salva em `output/<slug>.mp4`.
+
 
 - **`src/kaggle_trigger.py`**:
   - Módulo para disparar a execução remota do notebook no Kaggle enviando um evento `repository_dispatch` para a API do GitHub Actions.

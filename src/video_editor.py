@@ -158,14 +158,9 @@ def render_movie_video(
 
     ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
     
-    # 4. FILTRO DE VÍDEO COM ZOOM LEVE PERFEITO (Ken Burns 1.0 -> 1.06)
-    zoompan_filter = (
-        "scale=1920:1080:force_original_aspect_ratio=decrease,"
-        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,"
-        "zoompan=z='min(zoom+0.0005,1.06)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=125:fps=25:s=1920x1080,"
-        f"ass='{ass_path_escaped}'"
-    )
-    vf_filter = "".join(zoompan_filter)
+    # 4. FILTRO DE VÍDEO SLIDESHOW ULTRA-ESTÁVEL (Sem zoompan para estabilidade total)
+    vf_filter = f"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,ass='{ass_path_escaped}'"
+
 
 
 
