@@ -67,7 +67,7 @@ Tabela `movies`:
   - Notebook mestre parametrizado com Célula 1b dedicada à subida dos Servidores OmniVoice (GPU0 + GPU1) e renderização NVENC ultra-rápida.
 - **`src/telegram_bot.py`**:
   - Módulo assíncrono do Bot do Telegram para automação de vendas e postagens.
-  - **Fluxo 1 (Canal Público `@dramasleh`)**: Busca filmes no TMDB por nome, filtra e organiza galeria de imagens priorizando 1º Pôster em Português (`pt-BR`), 2º Pôster em Inglês (`en-US`), 3º e 4º Imagens Variadas, com suporte ao botão `🔄 Exibir Mais Imagens` (navegação por lotes). Gera Copy de Vendas persuasiva por IA (cadeia de fallbacks) com botão Inline `🔒 Solicitar Acesso (R$ 5,00)` redirecionando em 1 clique direto para o chat privado `@leh_lurdes` (`https://t.me/leh_lurdes`), enviando com preview e confirmação para o admin.
+  - **Fluxo 1 (Canal Público `@dramasleh`)**: Busca filmes no TMDB por nome, filtra e organiza galeria de imagens priorizando 1º Pôster em Português (`pt-BR`), 2º Pôster em Inglês (`en-US`), 3º e 4º Imagens Variadas, com navegação de lotes via `🔄 Exibir Mais Imagens` e controle de seleção interativo (`all_images_data`). Gera Copy de Vendas persuasiva por IA (cadeia de fallbacks) com botão Inline `🔒 Solicitar Acesso (R$ 5,00)` redirecionando em 1 clique direto para o chat privado `@leh_lurdes` (`https://t.me/leh_lurdes`), enviando com preview e confirmação para o admin.
   - **Fluxo 2 (Canal VIP)**: Recebe vídeos e publica em tela cheia diretamente no canal VIP (`TELEGRAM_VIP_CHANNEL_ID`).
 - **`run_bot.py`**:
   - Script principal na raiz para inicialização e execução contínua do Bot do Telegram em segundo plano.

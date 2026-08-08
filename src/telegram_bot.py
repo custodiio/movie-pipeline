@@ -289,20 +289,29 @@ async def handle_toggle_image(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     idx = int(query.data.split(":")[1])
     selected = context.user_data.get("selected_images", [])
-    available = context.user_data.get("available_images", [])
+    all_imgs = context.user_data.get("all_images_data", [])
 
-    img_url = available[idx]
+    if idx < 0 or idx >= len(all_imgs):
+        await query.answer("❌ Erro ao localizar imagem.", show_alert=True)
+        return STATE_SELECT_IMAGES
+
+    img_item = all_imgs[idx]
+    img_url = img_item["url"]
+    img_label = img_item["type"]
+
     if img_url in selected:
         selected.remove(img_url)
-        btn = InlineKeyboardButton(f"➕ Selecionar Imagem #{idx+1}", callback_data=f"toggle_img:{idx}")
-        status_txt = f"Opção #{idx+1}"
+        btn = InlineKeyboardButton(f"➕ Selecionar ({img_label})", callback_data=f"toggle_img:{idx}")
+        status_txt = f"Opção #{idx+1}: {img_label}"
+        await query.answer("Imagem removida da seleção!")
     else:
         if len(selected) >= 2:
             await query.answer("⚠️ Você só pode selecionar no máximo 2 imagens!", show_alert=True)
             return STATE_SELECT_IMAGES
         selected.append(img_url)
-        btn = InlineKeyboardButton(f"✅ REMOVER Imagem #{idx+1}", callback_data=f"toggle_img:{idx}")
-        status_txt = f"Opção #{idx+1} (SELECIONADA ★)"
+        btn = InlineKeyboardButton(f"✅ REMOVER ({img_label})", callback_data=f"toggle_img:{idx}")
+        status_txt = f"Opção #{idx+1}: {img_label} (SELECIONADA ★)"
+        await query.answer("Imagem selecionada com sucesso! ★")
 
     context.user_data["selected_images"] = selected
     await query.edit_message_caption(caption=status_txt, reply_markup=InlineKeyboardMarkup([[btn]]))
@@ -314,12 +323,12 @@ async def handle_confirm_images(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
 
     selected = context.user_data.get("selected_images", [])
-    available = context.user_data.get("available_images", [])
+    all_imgs = context.user_data.get("all_images_data", [])
     movie = context.user_data.get("selected_movie", {})
 
-    if not selected:
+    if not selected and all_imgs:
         # Se o usuário não selecionou nenhuma manual, pega a primeira por padrão
-        selected = [available[0]]
+        selected = [all_imgs[0]["url"]]
         context.user_data["selected_images"] = selected
 
     await query.message.reply_text("🤖 **Gerando Copying de Vendas Persuasiva por IA...**", parse_mode="Markdown")
