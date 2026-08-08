@@ -596,12 +596,16 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                     
                     orig_msg = await client.get_messages(source_chat, ids=source_msg_id)
                     if orig_msg:
-                        await client.send_message(chat_entity, orig_msg, caption=caption if caption else None)
+                        if orig_msg.media:
+                            await client.send_file(chat_entity, orig_msg.media, caption=caption if caption else orig_msg.text)
+                        else:
+                            await client.send_message(chat_entity, caption if caption else orig_msg.text)
                         published_via_telethon = True
                 elif msg_obj and msg_obj.message_id:
                     # Encaminha a mensagem original instantaneamente!
                     await client.forward_messages(chat_entity, msg_obj.message_id, msg_obj.chat_id)
                     published_via_telethon = True
+
 
                 await client.disconnect()
         except Exception as e:
