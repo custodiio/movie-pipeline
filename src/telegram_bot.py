@@ -155,56 +155,132 @@ async def handle_movie_selection(update: Update, context: ContextTypes.DEFAULT_T
 
     await query.edit_message_text(f"⏳ Carregando pôsteres e imagens de *{movie_details.get('title')}*...", parse_mode="Markdown")
 
-    # Busca galeria de imagens do filme no TMDB
-    images = get_tmdb_movie_images(movie_id)
-    if not images and movie_details.get("poster_path"):
-        images = [f"https://image.tmdb.org/t/p/w780{movie_details['poster_path']}"]
+    # Busca galeria de imagens do filme categorizada (PT, EN, Variadas)
+    all_images_data = get_tmdb_movie_images(movie_id)
+    if not all_images_data and movie_details.get("poster_path"):
+        all_images_data = [{"url": f"https://image.tmdb.org/t/p/w780{movie_details['poster_path']}", "type": "🎬 Pôster Oficial"}]
 
-    if not images:
-        images = ["https://via.placeholder.com/780x1170.png?text=Poster+Nao+Disponivel"]
+    if not all_images_data:
+        all_images_data = [{"url": "https://via.placeholder.com/780x1170.png?text=Poster+Nao+Disponivel", "type": "🎬 Pôster"}]
 
-    context.user_data["available_images"] = images[:8]
+    context.user_data["all_images_data"] = all_images_data
+    context.user_data["image_page"] = 0
+    context.user_data["selected_images"] = []
 
-    # Envia as opções de imagens como mensagens de preview
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text=f"🖼️ **Escolha 1 ou 2 imagens para o post de '{movie_details.get('title')}':**\n\n"
-             f"Selecione clicando nos botões abaixo das imagens e depois clique em **✅ Confirmar Imagens**:",
-        parse_mode="Markdown"
-    )
+    return await send_image_batch(query.message, context, movie_details.get('title', 'Filme'))
 
-    for i, img_url in enumerate(context.user_data["available_images"], 1):
-        btn = InlineKeyboardButton(f"➕ Selecionar Imagem #{i}", callback_data=f"toggle_img:{i-1}")
-        await context.bot.send_photo(
-            chat_id=query.message.chat_id,
-            photo=img_url,
-            caption=f"Opção #{i}",
-            reply_markup=InlineKeyboardMarkup([[btn]])
-        )
-
-    confirm_btn = InlineKeyboardButton("✅ Confirmar Imagens Selecionadas", callback_data="confirm_images")
-    await context.bot.send_message(
-        chat_id=query.message.chat_id,
-        text="Assim que escolher 1 ou 2 imagens acima, clique abaixo:",
-        reply_markup=InlineKeyboardMarkup([[confirm_btn]])
-    )
-
-    return STATE_SELECT_IMAGES
-
-def get_tmdb_movie_images(movie_id: str) -> list[str]:
-    """Busca os posters/backdrops em alta resolução do filme no TMDB."""
+def get_tmdb_movie_images(movie_id: str) -> list[dict]:
+    """
+    Busca as imagens no TMDB categorizando obrigatoriamente:
+    1. Pôster em Português (pt/br)
+    2. Pôster em Inglês (en)
+    3. Outras 2+ imagens variadas (pôsteres/backdrops)
+    """
     api_key = os.getenv("TMDB_API_KEY", "")
-    url = f"https://api.themoviedb.org/3/movie/{movie_id}/images?api_key={api_key}"
+    url = f"https://api.themoviedb.org/3/movie/{movie_id}/images?api_key={api_key}&include_image_language=pt,br,en,null"
+    
+    result = []
+    seen = set()
+    
     try:
         res = requests.get(url, timeout=10)
         if res.status_code == 200:
             data = res.json()
-            posters = [f"https://image.tmdb.org/t/p/w780{img['file_path']}" for img in data.get("posters", [])[:5]]
-            backdrops = [f"https://image.tmdb.org/t/p/w780{img['file_path']}" for img in data.get("backdrops", [])[:3]]
-            return posters + backdrops
+            posters = data.get("posters", [])
+            backdrops = data.get("backdrops", [])
+            
+            # 1. Pôsteres em Português (pt / br)
+            for img in posters:
+                lang = (img.get("iso_639_1") or "").lower()
+                if lang in ["pt", "br"]:
+                    full_url = f"https://image.tmdb.org/t/p/w780{img['file_path']}"
+                    if full_url not in seen:
+                        seen.add(full_url)
+                        result.append({"url": full_url, "type": "🇧🇷 Pôster em Português"})
+                        
+            # 2. Pôsteres em Inglês (en)
+            for img in posters:
+                lang = (img.get("iso_639_1") or "").lower()
+                if lang in ["en"]:
+                    full_url = f"https://image.tmdb.org/t/p/w780{img['file_path']}"
+                    if full_url not in seen:
+                        seen.add(full_url)
+                        result.append({"url": full_url, "type": "🇺🇸 Pôster em Inglês"})
+                        
+            # 3. Demais Pôsteres variados
+            for img in posters:
+                full_url = f"https://image.tmdb.org/t/p/w780{img['file_path']}"
+                if full_url not in seen:
+                    seen.add(full_url)
+                    result.append({"url": full_url, "type": "🎬 Pôster Oficial"})
+                    
+            # 4. Backdrops / Cenas de Fundo
+            for img in backdrops:
+                full_url = f"https://image.tmdb.org/t/p/w780{img['file_path']}"
+                if full_url not in seen:
+                    seen.add(full_url)
+                    result.append({"url": full_url, "type": "🌄 Cena do Filme (Backdrop)"})
+                    
     except Exception as e:
         logging.warning(f"Erro ao buscar imagens no TMDB: {e}")
-    return []
+        
+    return result
+
+async def send_image_batch(message, context: ContextTypes.DEFAULT_TYPE, title: str):
+    """Envia um lote de 4 imagens com botões de seleção e opção de carregar mais."""
+    all_imgs = context.user_data.get("all_images_data", [])
+    page = context.user_data.get("image_page", 0)
+    batch_size = 4
+    
+    start_idx = page * batch_size
+    current_batch = all_imgs[start_idx : start_idx + batch_size]
+    
+    if not current_batch:
+        page = 0
+        context.user_data["image_page"] = 0
+        start_idx = 0
+        current_batch = all_imgs[:batch_size]
+
+    await message.reply_text(
+        f"🖼️ **Escolha 1 ou 2 imagens para o post de '{title}' (Lote {page+1}):**\n\n"
+        f"1. Português | 2. Inglês | 3 e 4. Variadas\n"
+        f"Selecione nos botões das fotos e depois clique em **✅ Confirmar Imagens**:",
+        parse_mode="Markdown"
+    )
+
+    for i, item in enumerate(current_batch, 1):
+        global_idx = start_idx + i - 1
+        img_url = item["url"]
+        img_label = item["type"]
+        
+        btn = InlineKeyboardButton(f"➕ Selecionar ({img_label})", callback_data=f"toggle_img:{global_idx}")
+        await context.bot.send_photo(
+            chat_id=message.chat_id,
+            photo=img_url,
+            caption=f"Opção #{global_idx+1}: {img_label}",
+            reply_markup=InlineKeyboardMarkup([[btn]])
+        )
+
+    bottom_btns = [
+        [InlineKeyboardButton("✅ Confirmar Imagens Selecionadas", callback_data="confirm_images")],
+        [InlineKeyboardButton("🔄 Exibir Mais Imagens (Próximo Lote)", callback_data="next_image_batch")]
+    ]
+    await context.bot.send_message(
+        chat_id=message.chat_id,
+        text="Assim que escolher as imagens acima (ou quiser ver mais), clique abaixo:",
+        reply_markup=InlineKeyboardMarkup(bottom_btns)
+    )
+    return STATE_SELECT_IMAGES
+
+async def handle_next_image_batch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Avança para o próximo lote de imagens."""
+    query = update.callback_query
+    await query.answer()
+    
+    context.user_data["image_page"] = context.user_data.get("image_page", 0) + 1
+    movie = context.user_data.get("selected_movie", {})
+    return await send_image_batch(query.message, context, movie.get("title", "Filme"))
+
 
 async def handle_toggle_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Adiciona ou remove imagem selecionada."""
@@ -449,7 +525,8 @@ def create_telegram_bot_app() -> Application:
             STATE_SELECT_MOVIE: [CallbackQueryHandler(handle_movie_selection, pattern="^(select_movie|cancel_post)")],
             STATE_SELECT_IMAGES: [
                 CallbackQueryHandler(handle_toggle_image, pattern="^toggle_img:"),
-                CallbackQueryHandler(handle_confirm_images, pattern="^confirm_images$")
+                CallbackQueryHandler(handle_confirm_images, pattern="^confirm_images$"),
+                CallbackQueryHandler(handle_next_image_batch, pattern="^next_image_batch$")
             ],
             STATE_PREVIEW_POST: [
                 CallbackQueryHandler(handle_publish_post, pattern="^publish_now$"),
