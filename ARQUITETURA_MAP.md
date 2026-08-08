@@ -68,7 +68,7 @@ Tabela `movies`:
 - **`src/telegram_bot.py`**:
   - Módulo assíncrono do Bot do Telegram para automação de vendas e postagens.
   - **Fluxo 1 (Canal Público `@dramasleh`)**: Busca filmes no TMDB por nome, filtra e organiza galeria de imagens priorizando 1º Pôster em Português (`pt-BR`), 2º Pôster em Inglês (`en-US`), 3º e 4º Imagens Variadas, com navegação de lotes via `🔄 Exibir Mais Imagens` e controle de seleção interativo (`all_images_data`). Gera Copy de Vendas persuasiva por IA (cadeia de fallbacks) com botão Inline `🔒 Solicitar Acesso (R$ 5,00)` redirecionando com espaços em branco limpos (`quote_plus`) direto para o chat privado `@leh_lurdes` (`https://t.me/leh_lurdes?text=...`), enviando com preview e confirmação para o admin.
-  - **Fluxo 2 (Canal VIP)**: Publicação ultra-rápida em menos de 1 segundo utilizando o cliente nativo **Telethon MTProto** (reaproveitando a sessão autenticada do `DailymotionAgent`). Detecta e exibe a legenda original em tempo real via Telethon ao receber links (`https://t.me/c/...`) e suporta edição interativa de legenda (`STATE_EDIT_VIP_TITLE`).
+  - **Fluxo 2 (Canal VIP)**: Publicação ultra-rápida em menos de 1 segundo utilizando o cliente nativo **Telethon MTProto** (reaproveitando a sessão autenticada do `DailymotionAgent`) direcionado ao ID numérico do canal VIP privado (`-1002113392315`). Detecta e exibe a legenda original em tempo real via Telethon ao receber links (`https://t.me/c/...`) e suporta edição interativa de legenda (`STATE_EDIT_VIP_TITLE`).
 - **`run_bot.py`**:
   - Script principal na raiz para inicialização e execução contínua do Bot do Telegram em segundo plano.
 - **`main.py`**:

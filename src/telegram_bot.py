@@ -41,8 +41,12 @@ from dotenv import load_dotenv
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@dramasleh")
-TELEGRAM_VIP_CHANNEL_ID = os.getenv("TELEGRAM_VIP_CHANNEL_ID", "@telacheiafilmesvip")
+raw_vip_id = os.getenv("TELEGRAM_VIP_CHANNEL_ID", "-1002113392315")
+try:
+    TELEGRAM_VIP_CHANNEL_ID = int(raw_vip_id)
+except ValueError:
+    TELEGRAM_VIP_CHANNEL_ID = raw_vip_id
+
 TELEGRAM_SALES_USERNAME = os.getenv("TELEGRAM_SALES_USERNAME", "leh_lurdes").replace("@", "")
 
 def build_sales_link(movie_title: str = None) -> str:
