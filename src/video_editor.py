@@ -48,8 +48,8 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: DVDBounce,Bungee,32,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,1,2,0,5,10,10,10,1
-Style: DVDBounceSub,Bungee,22,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,0,0,0,0,100,100,0,0,1,1,0,5,10,10,10,1
+Style: DVDBounce,Bungee,48,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,1,2,0,5,10,10,10,1
+Style: DVDBounceSub,Bungee,30,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,0,0,0,0,100,100,0,0,1,1,0,5,10,10,10,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -157,28 +157,36 @@ def render_movie_video(
     # 3. Cria lista do Concat de Imagens
     concat_txt_path = build_slideshow_concat_script(images, narration_duration, temp_dir)
 
-    ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
-    
-    # 4. FILTRO DE VÍDEO SLIDESHOW ULTRA-ESTÁVEL (Sem zoompan para estabilidade total)
-    vf_filter = f"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,ass='{ass_path_escaped}'"
+    slideshow_raw_temp = os.path.join(temp_dir, "slideshow_raw.mp4")
 
-
-
-
-    # Renderiza o bloco principal do filme com áudio 44100Hz 2ch
-    cmd_slideshow = [
+    # 4a. Passada 1: Renderiza o slideshow das fotos + áudio em vídeo contínuo
+    vf_scale = "scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black"
+    cmd_raw = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0", "-i", concat_txt_path,
         "-i", voiceover_path,
-        "-vf", vf_filter,
+        "-vf", vf_scale,
         "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
         "-pix_fmt", "yuv420p", "-r", "30",
         "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
         "-shortest",
+        slideshow_raw_temp
+    ]
+    logging.info(f"Renderizando base do filme ({narration_duration:.1f}s)...")
+    subprocess.run(cmd_raw, check=True)
+
+    # 4b. Passada 2: Aplica a marca d'água ASS sobre o vídeo contínuo (animação 100% fluida e sem resets)
+    vf_ass = f"ass='{ass_path_escaped}'"
+    cmd_watermark = [
+        "ffmpeg", "-y",
+        "-i", slideshow_raw_temp,
+        "-vf", vf_ass,
+        "-c:v", "libx264", "-preset", "ultrafast", "-threads", "0",
+        "-pix_fmt", "yuv420p", "-c:a", "copy",
         slideshow_video_temp
     ]
-    logging.info(f"Renderizando bloco principal do filme ({narration_duration:.1f}s = {narration_duration/60:.1f}min) com Zoom/Pan diversificado...")
-    subprocess.run(cmd_slideshow, check=True)
+    logging.info("Aplicando Marca D'água animada em passada única contínua...")
+    subprocess.run(cmd_watermark, check=True)
 
 
     # 4. Normaliza a Intro UMA ÚNICA VEZ para codificação idêntica
