@@ -35,14 +35,26 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.tmdb_client import search_movies, get_movie_details
 from src.script_generator import generate_sales_copy
 
-load_dotenv()
+import urllib.parse
+from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID", "@dramasleh")
 TELEGRAM_VIP_CHANNEL_ID = os.getenv("TELEGRAM_VIP_CHANNEL_ID", "@telacheiafilmesvip")
-TELEGRAM_SALES_LINK = os.getenv("TELEGRAM_SALES_LINK", "https://t.me/dramasleh")
+WHATSAPP_SALES_NUMBER = os.getenv("WHATSAPP_SALES_NUMBER", "5564992430964")
+TELEGRAM_SALES_LINK = os.getenv("TELEGRAM_SALES_LINK", f"https://wa.me/{WHATSAPP_SALES_NUMBER}?text=Ol%C3%A1!%20Tenho%20interesse%20e%20gostaria%20de%20adquirir%20o%20acesso%20ao%20Canal%20VIP!")
+
+def build_sales_link(movie_title: str = None) -> str:
+    """Gera o link de vendas direcionando para o WhatsApp com a mensagem de saudação pronta."""
+    number = os.getenv("WHATSAPP_SALES_NUMBER", WHATSAPP_SALES_NUMBER)
+    if movie_title:
+        msg = f"Olá! Tenho interesse no filme '{movie_title.upper()}' e gostaria de adquirir o acesso ao Canal VIP!"
+    else:
+        msg = "Olá! Tenho interesse e gostaria de adquirir o acesso ao Canal VIP de filmes!"
+    encoded = urllib.parse.quote(msg)
+    return f"https://wa.me/{number}?text={encoded}"
 
 # Estados da Conversa para Criar Postagem no Canal Público
 STATE_SEARCH_MOVIE, STATE_SELECT_MOVIE, STATE_SELECT_IMAGES, STATE_PREVIEW_POST, STATE_EDIT_COPY = range(5)
@@ -246,7 +258,9 @@ async def handle_confirm_images(update: Update, context: ContextTypes.DEFAULT_TY
     context.user_data["generated_copy"] = copy_text
 
     # Exibe o Preview Completo
-    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso (R$ 5,00)", url=TELEGRAM_SALES_LINK)
+    movie_title = movie.get("title", "")
+    sales_link = build_sales_link(movie_title)
+    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso (R$ 5,00)", url=sales_link)
     markup = InlineKeyboardMarkup([[sales_button]])
 
     await query.message.reply_text("👇 **PREVIEW DA POSTAGEM DO CANAL:**", parse_mode="Markdown")
@@ -292,7 +306,9 @@ async def handle_edit_copy_receive(update: Update, context: ContextTypes.DEFAULT
     new_text = update.message.text.strip()
     context.user_data["generated_copy"] = new_text
 
-    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso (R$ 5,00)", url=TELEGRAM_SALES_LINK)
+    movie = context.user_data.get("selected_movie", {})
+    sales_link = build_sales_link(movie.get("title", ""))
+    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso (R$ 5,00)", url=sales_link)
     markup = InlineKeyboardMarkup([[sales_button]])
     selected = context.user_data.get("selected_images", [])
 
@@ -321,9 +337,12 @@ async def handle_publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     selected = context.user_data.get("selected_images", [])
     copy_text = context.user_data.get("generated_copy", "")
+    movie = context.user_data.get("selected_movie", {})
 
-    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso (R$ 5,00)", url=TELEGRAM_SALES_LINK)
+    sales_link = build_sales_link(movie.get("title", ""))
+    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso (R$ 5,00)", url=sales_link)
     markup = InlineKeyboardMarkup([[sales_button]])
+
 
     try:
         if len(selected) == 1:
