@@ -149,16 +149,27 @@ def render_movie_video(
     audio_seg = AudioSegment.from_file(voiceover_path)
     narration_duration = len(audio_seg) / 1000.0
 
-    # 2. Gera legenda ASS do DVD Bounce
-    generate_dvd_bounce_ass(ass_path, narration_duration)
+    # 2. Gera/Garanta legenda ASS pré-calculada de 30 min (ultraleve)
+    generate_dvd_bounce_ass(ass_path, 1800.0)
 
     # 3. Cria lista do Concat de Imagens
     concat_txt_path = build_slideshow_concat_script(images, narration_duration, temp_dir)
 
     ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
-    vf_filter = f"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,ass='{ass_path_escaped}'"
+    
+    # 4. FILTRO DE VÍDEO COM ANIMAÇÃO DIVERSIFICADA (Zoom In/Out + Pan Esquerda/Direita) EM TODAS AS IMAGENS!
+    zoompan_filter = (
+        "scale=1920:1080:force_original_aspect_ratio=decrease,"
+        "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,"
+        "zoompan=z='if(lte(mod(on,300),150), 1.0+0.002*mod(on,150), 1.3-0.002*mod(on,150))':"
+        "x='iw/2-(iw/zoom/2)+sin(on/30)*80':"
+        "y='ih/2-(ih/zoom/2)+cos(on/35)*40':"
+        "d=1:fps=30:s=1920x1080,"
+        f"ass='{ass_path_escaped}'"
+    )
+    vf_filter = "".join(zoompan_filter)
 
-    # Renderiza o bloco principal do filme com áudio 44100Hz 2ch para bater exatamente com a intro
+    # Renderiza o bloco principal do filme com áudio 44100Hz 2ch
     cmd_slideshow = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0", "-i", concat_txt_path,
@@ -170,8 +181,9 @@ def render_movie_video(
         "-shortest",
         slideshow_video_temp
     ]
-    logging.info(f"Renderizando bloco principal do filme ({narration_duration:.1f}s = {narration_duration/60:.1f}min)...")
+    logging.info(f"Renderizando bloco principal do filme ({narration_duration:.1f}s = {narration_duration/60:.1f}min) com Zoom/Pan diversificado...")
     subprocess.run(cmd_slideshow, check=True)
+
 
     # 4. Normaliza a Intro UMA ÚNICA VEZ para codificação idêntica
     has_intro = False
