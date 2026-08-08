@@ -67,7 +67,8 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     ]
     
     t = 0.0
-    step = 4.0 # Muda de posição a cada 4 segundos
+    step = 12.0 # MOVIMENTO LENTO DA WATERMARK: 12 segundos por travessia!
+
     pos_idx = 0
     
     def format_time(seconds: float) -> str:
@@ -157,18 +158,15 @@ def render_movie_video(
 
     ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
     
-    # 4. FILTRO DE VÍDEO COM ANIMAÇÃO DIVERSIFICADA (fps=30 expande a imagem antes do zoompan!)
+    # 4. FILTRO DE VÍDEO COM ZOOM LEVE PERFEITO (Ken Burns 1.0 -> 1.06)
     zoompan_filter = (
-        "fps=30,"
         "scale=1920:1080:force_original_aspect_ratio=decrease,"
         "pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,"
-        "zoompan=z='if(lte(mod(on,300),150), 1.0+0.002*mod(on,150), 1.3-0.002*mod(on,150))':"
-        "x='iw/2-(iw/zoom/2)+sin(on/30)*80':"
-        "y='ih/2-(ih/zoom/2)+cos(on/35)*40':"
-        "d=1:fps=30:s=1920x1080,"
+        "zoompan=z='min(zoom+0.0005,1.06)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=125:fps=25:s=1920x1080,"
         f"ass='{ass_path_escaped}'"
     )
     vf_filter = "".join(zoompan_filter)
+
 
 
     # Renderiza o bloco principal do filme com áudio 44100Hz 2ch
