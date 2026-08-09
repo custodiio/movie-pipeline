@@ -61,10 +61,11 @@ def build_sales_link(movie_title: str = None) -> str:
 
 
 # Estados da Conversa para Criar Postagem no Canal Público
-STATE_SEARCH_MOVIE, STATE_SELECT_MOVIE, STATE_SELECT_IMAGES, STATE_PREVIEW_POST, STATE_EDIT_COPY = range(5)
+STATE_SEARCH_MOVIE, STATE_SELECT_MOVIE, STATE_SELECT_AUDIO, STATE_SELECT_IMAGES, STATE_PREVIEW_POST, STATE_EDIT_COPY = range(6)
 
 # Estados da Conversa para Postar Vídeo no Canal VIP
-STATE_RECEIVE_VIDEO, STATE_CONFIRM_VIDEO_TITLE, STATE_EDIT_VIP_TITLE = range(5, 8)
+STATE_RECEIVE_VIDEO, STATE_CONFIRM_VIDEO_TITLE, STATE_EDIT_VIP_TITLE = range(6, 9)
+
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -162,6 +163,33 @@ async def handle_movie_selection(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data["selected_movie"] = movie_details
     context.user_data["selected_images"] = []
 
+    # Exibe a pergunta interativa do formato de áudio para a postagem
+    audio_btns = [
+        [InlineKeyboardButton("🔊 DUBLADO", callback_data="audio:DUBLADO")],
+        [InlineKeyboardButton("💬 LEGENDADO", callback_data="audio:LEGENDADO")],
+        [InlineKeyboardButton("🔊💬 DUBLADO / LEGENDADO", callback_data="audio:DUBLADO / LEGENDADO")]
+    ]
+
+    await query.edit_message_text(
+        f"🎬 **Filme Selecionado:** *{movie_details.get('title')}*\n\n"
+        f"🔊 **Selecione a opção de áudio do filme:**",
+        reply_markup=InlineKeyboardMarkup(audio_btns),
+        parse_mode="Markdown"
+    )
+    return STATE_SELECT_AUDIO
+
+
+async def handle_audio_select(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Passo 3: Salva o áudio escolhido e carrega os pôsteres do TMDB."""
+    query = update.callback_query
+    await query.answer()
+
+    audio_opt = query.data.split(":", 1)[1]
+    context.user_data["audio_option"] = audio_opt
+
+    movie_details = context.user_data.get("selected_movie", {})
+    movie_id = str(movie_details.get("id"))
+
     await query.edit_message_text(f"⏳ Carregando pôsteres e imagens de *{movie_details.get('title')}*...", parse_mode="Markdown")
 
     # Busca galeria de imagens do filme categorizada (PT, EN, Variadas)
@@ -177,6 +205,7 @@ async def handle_movie_selection(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data["selected_images"] = []
 
     return await send_image_batch(query.message, context, movie_details.get('title', 'Filme'))
+
 
 def get_tmdb_movie_images(movie_id: str) -> list[dict]:
     """
@@ -342,15 +371,17 @@ async def handle_confirm_images(update: Update, context: ContextTypes.DEFAULT_TY
 
     await query.message.reply_text("🤖 **Gerando Copying de Vendas Persuasiva por IA...**", parse_mode="Markdown")
 
-    # Gera a Copy persuasiva via IA com fallbacks
-    copy_text = generate_sales_copy(movie)
+    # Gera a Copy persuasiva via IA com a estrutura padrao estrita e opcao de audio
+    audio_option = context.user_data.get("audio_option", "DUBLADO")
+    copy_text = generate_sales_copy(movie, audio_option)
     context.user_data["generated_copy"] = copy_text
 
     # Exibe o Preview Completo
     movie_title = movie.get("title", "")
     sales_link = build_sales_link(movie_title)
-    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso (R$ 5,00)", url=sales_link)
-    markup = InlineKeyboardMarkup([[sales_button]])
+    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso Vitalício R$10,00", url=sales_link)
+    support_button = InlineKeyboardButton("💬 Falar com Suporte", url="https://t.me/leh_lurdes")
+    markup = InlineKeyboardMarkup([[sales_button], [support_button]])
 
     await query.message.reply_text("👇 **PREVIEW DA POSTAGEM DO CANAL:**", parse_mode="Markdown")
 
@@ -365,7 +396,7 @@ async def handle_confirm_images(update: Update, context: ContextTypes.DEFAULT_TY
         # 2 imagens via MediaGroup
         media = [InputMediaPhoto(media=selected[0], caption=copy_text), InputMediaPhoto(media=selected[1])]
         await context.bot.send_media_group(chat_id=query.message.chat_id, media=media)
-        # Envia a mensagem com o botão em seguida
+        # Envia a mensagem com os botões em seguida
         await context.bot.send_message(
             chat_id=query.message.chat_id,
             text="👇 **Clique abaixo para solicitar o acesso VIP:**",
@@ -397,8 +428,9 @@ async def handle_edit_copy_receive(update: Update, context: ContextTypes.DEFAULT
 
     movie = context.user_data.get("selected_movie", {})
     sales_link = build_sales_link(movie.get("title", ""))
-    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso (R$ 5,00)", url=sales_link)
-    markup = InlineKeyboardMarkup([[sales_button]])
+    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso Vitalício R$10,00", url=sales_link)
+    support_button = InlineKeyboardButton("💬 Falar com Suporte", url="https://t.me/leh_lurdes")
+    markup = InlineKeyboardMarkup([[sales_button], [support_button]])
     selected = context.user_data.get("selected_images", [])
 
     await update.message.reply_text("👇 **NOVO PREVIEW ATUALIZADO:**", parse_mode="Markdown")
@@ -429,9 +461,10 @@ async def handle_publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     movie = context.user_data.get("selected_movie", {})
 
     sales_link = build_sales_link(movie.get("title", ""))
-    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso VIP (R$ 10,00)", url=sales_link)
+    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso Vitalício R$10,00", url=sales_link)
     support_button = InlineKeyboardButton("💬 Falar com Suporte", url="https://t.me/leh_lurdes")
     markup = InlineKeyboardMarkup([[sales_button], [support_button]])
+
 
 
 
@@ -657,6 +690,7 @@ def create_telegram_bot_app() -> Application:
         states={
             STATE_SEARCH_MOVIE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_movie)],
             STATE_SELECT_MOVIE: [CallbackQueryHandler(handle_movie_selection, pattern="^(select_movie|cancel_post)")],
+            STATE_SELECT_AUDIO: [CallbackQueryHandler(handle_audio_select, pattern="^audio:")],
             STATE_SELECT_IMAGES: [
                 CallbackQueryHandler(handle_toggle_image, pattern="^toggle_img:"),
                 CallbackQueryHandler(handle_confirm_images, pattern="^confirm_images$"),
@@ -669,6 +703,7 @@ def create_telegram_bot_app() -> Application:
             ],
             STATE_EDIT_COPY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_copy_receive)]
         },
+
         fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
         per_message=False
     )

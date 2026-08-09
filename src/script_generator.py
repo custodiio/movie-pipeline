@@ -191,45 +191,61 @@ def generate_detailed_movie_script(movie_info: dict) -> str:
     logging.info(f"Roteiro completo gerado com sucesso para '{title}' ({len(full_script)} caracteres).")
     return full_script
 
-def generate_sales_copy(movie_data: dict) -> str:
+def generate_sales_copy(movie_data: dict, audio_option: str = "DUBLADO") -> str:
     """
-    Gera uma copy de vendas persuasiva e atraente para o canal do Telegram
-    com base nos metadados do filme (título, sinopse, ano, etc).
+    Gera uma copy de vendas persuasiva com a estrutura padrão estrita solicitada pelo usuário:
+    🍿 **NOME DO FILME**
+    🔊 **OPÇÃO DE ÁUDIO**
+    
+    [sinopse emocionante]
+    
+    ----------------------------------------------------------
+    💰 **Apenas R$ 10,00 (Pagamento Único)**
+    ----------------------------------------------------------
+    📌 O que você garante no acesso VIP: 
+    🎬 Filme completo em alta definição (sem anúncios)
+    📬 Download liberado para assistir offline
+    ⚡️ Acesso vitalício e imediato ao canal privado
+
+    👇 Clique abaixo para solicitar o acesso VIP:
     """
     title = movie_data.get("title", "Lançamento VIP").upper()
     overview = movie_data.get("overview", "")
     release_date = movie_data.get("release_date", "")
     year = release_date.split("-")[0] if release_date else ""
     
-    prompt = f"""Você é um copywriter de elite especializado em vendas de canais VIP de filmes e séries no Telegram.
-Crie uma postagem altamente persuasiva, atraente e emotiva para vender acesso ao filme abaixo:
+    prompt = f"""Você é um copywriter de elite para canais de cinema no Telegram.
+Crie um resumo envolvente e emocionante de 2 a 4 linhas para a sinopse do filme abaixo:
 
 Título: {title}
 Ano: {year}
 Sinopse original: {overview}
 
-FORMATO OBRIGATÓRIO (MANTENHA OS EMOJIS E O ESTILO EXATO DA ESTRUTURA):
-
-🍿 {title} 🍿
-
-LANÇAMENTO
-💰 Apenas R$ 10,00 (Acesso Único)
-
-[Escreva aqui um parágrafo emocionante de 2 a 4 linhas chamando atenção para o filme, incentivando a reassistir ou assistir pela primeira vez em qualidade 4K ULTRA HD e dublado!]
-
-📌 O que você garante no acesso VIP: 🎬 Filme completo em alta definição (sem travamentos)
-🔊 Áudio Dual (Dublado / Legendado)
-📬 Download liberado para assistir offline
-⚡ Acesso vitalício e imediato ao canal privado
-
-💰 Apenas R$ 10,00 (Acesso Único)
-
-
-REGRAS:
-1. Retorne APENAS o texto da postagem em português do Brasil.
-2. Não adicione notas, explicações extras ou formatações markdown inválidas.
+REGRAS DE RESPOSTA:
+1. Retorne APENAS o parágrafo corrido da sinopse emocionante (2 a 4 linhas).
+2. Não inclua título, marcações extras, explicações ou notas.
 """
 
-    copy_text = generate_llm_text(prompt, system_instruction="Você é um Copywriter especialista em canais VIP de entretenimento no Telegram.")
-    return copy_text.strip()
+    summary_text = generate_llm_text(prompt, system_instruction="Você é um Copywriter especialista em canais VIP de entretenimento.")
+    if not summary_text or len(summary_text.strip()) < 10:
+        summary_text = overview
+
+    audio_formatted = audio_option.upper().strip()
+
+    final_copy = (
+        f"🍿 **{title}**\n"
+        f"🔊 **{audio_formatted}**\n\n"
+        f"{summary_text.strip()}\n\n"
+        f"----------------------------------------------------------\n"
+        f"💰 **Apenas R$ 10,00 (Pagamento Único)**\n"
+        f"----------------------------------------------------------\n"
+        f"📌 O que você garante no acesso VIP: \n"
+        f"🎬 Filme completo em alta definição (sem anúncios)\n"
+        f"📬 Download liberado para assistir offline\n"
+        f"⚡️ Acesso vitalício e imediato ao canal privado\n\n"
+        f"👇 Clique abaixo para solicitar o acesso VIP:"
+    )
+
+    return final_copy
+
 
