@@ -765,6 +765,25 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
 
 
                                     if downloaded_path and os.path.exists(downloaded_path):
+                                        file_size_mb = os.path.getsize(downloaded_path) / (1024 * 1024)
+                                        if file_size_mb > 2000:
+                                            logging.info(f"Arquivo de {file_size_mb:.1f} MB excede o limite de 2000 MB do Telegram. Otimizando via FFmpeg...")
+                                            tracker_opt = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, f"⚙️ Ajustando Tamanho do Vídeo de {file_size_mb:.1f} MB para < 2.0 GB")
+                                            compressed_path = downloaded_path.rsplit('.', 1)[0] + "_opt.mp4"
+                                            cmd = [
+                                                "ffmpeg", "-y", "-i", downloaded_path,
+                                                "-c:v", "libx264", "-crf", "25", "-preset", "fast",
+                                                "-c:a", "aac", "-b:a", "128k",
+                                                compressed_path
+                                            ]
+                                            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                                            await proc.communicate()
+                                            if os.path.exists(compressed_path) and os.path.getsize(compressed_path) > 0:
+                                                try:
+                                                    os.remove(downloaded_path)
+                                                except Exception:
+                                                    pass
+                                                downloaded_path = compressed_path
 
                                         tracker_reup = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "🚀 Enviando Vídeo para o Canal VIP")
                                         await client.send_file(chat_entity, downloaded_path, caption=caption if caption else orig_msg.text, progress_callback=tracker_reup.callback)
@@ -773,6 +792,7 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                                             os.remove(downloaded_path)
                                         except Exception:
                                             pass
+
                                     else:
                                         error_reason = "Não foi possível baixar a mídia do canal protegido."
                                 else:
