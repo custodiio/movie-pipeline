@@ -390,11 +390,12 @@ async def handle_confirm_images(update: Update, context: ContextTypes.DEFAULT_TY
             chat_id=query.message.chat_id,
             photo=selected[0],
             caption=copy_text,
+            parse_mode="Markdown",
             reply_markup=markup
         )
     else:
         # 2 imagens via MediaGroup
-        media = [InputMediaPhoto(media=selected[0], caption=copy_text), InputMediaPhoto(media=selected[1])]
+        media = [InputMediaPhoto(media=selected[0], caption=copy_text, parse_mode="Markdown"), InputMediaPhoto(media=selected[1])]
         await context.bot.send_media_group(chat_id=query.message.chat_id, media=media)
         # Envia a mensagem com os botões em seguida
         await context.bot.send_message(
@@ -439,6 +440,7 @@ async def handle_edit_copy_receive(update: Update, context: ContextTypes.DEFAULT
         chat_id=update.message.chat_id,
         photo=selected[0],
         caption=new_text,
+        parse_mode="Markdown",
         reply_markup=markup
     )
 
@@ -475,10 +477,11 @@ async def handle_publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE
                 chat_id=TELEGRAM_CHANNEL_ID,
                 photo=selected[0],
                 caption=copy_text,
+                parse_mode="Markdown",
                 reply_markup=markup
             )
         else:
-            media = [InputMediaPhoto(media=selected[0], caption=copy_text), InputMediaPhoto(media=selected[1])]
+            media = [InputMediaPhoto(media=selected[0], caption=copy_text, parse_mode="Markdown"), InputMediaPhoto(media=selected[1])]
             await context.bot.send_media_group(chat_id=TELEGRAM_CHANNEL_ID, media=media)
             await context.bot.send_message(
                 chat_id=TELEGRAM_CHANNEL_ID,
@@ -594,6 +597,54 @@ async def handle_edit_vip_title_receive(update: Update, context: ContextTypes.DE
     return STATE_CONFIRM_VIDEO_TITLE
 
 
+import time
+
+class TelethonProgressTracker:
+    def __init__(self, bot_app, chat_id, message_id, action_name="Processando"):
+        self.bot_app = bot_app
+        self.chat_id = chat_id
+        self.message_id = message_id
+        self.action_name = action_name
+        self.start_time = time.time()
+        self.last_update_time = 0
+
+    def callback(self, current, total):
+        now = time.time()
+        if now - self.last_update_time < 2.5 and current < total:
+            return
+
+        self.last_update_time = now
+        elapsed = now - self.start_time
+        speed = (current / elapsed) if elapsed > 0 else 0
+        speed_mb = speed / (1024 * 1024)
+
+        current_mb = current / (1024 * 1024)
+        total_mb = total / (1024 * 1024)
+        percent = (current / total) * 100 if total > 0 else 0
+
+        filled = int(percent // 10)
+        bar = "█" * filled + "░" * (10 - filled)
+
+        text = (
+            f"⚡ **{self.action_name}...**\n\n"
+            f"📊 **Progresso:** `[{bar}] {percent:.1f}%`\n"
+            f"📦 **Tamanho:** `{current_mb:.1f} MB / {total_mb:.1f} MB`\n"
+            f"🚀 **Velocidade:** `{speed_mb:.2f} MB/s`"
+        )
+        try:
+            loop = asyncio.get_event_loop()
+            loop.create_task(
+                self.bot_app.bot.edit_message_text(
+                    chat_id=self.chat_id,
+                    message_id=self.message_id,
+                    text=text,
+                    parse_mode="Markdown"
+                )
+            )
+        except Exception:
+            pass
+
+
 async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Envia o vídeo para o Canal VIP em tela cheia via Telethon instantâneo."""
     query = update.callback_query
@@ -623,7 +674,6 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                 await client.get_dialogs()
                 
                 if video_link and ("t.me/c/" in video_link or "t.me/" in video_link):
-
                     parts = video_link.strip().split('/')
                     source_msg_id = int(parts[-1])
                     source_chat_raw = parts[-2]
@@ -636,21 +686,24 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                         orig_msg = await client.get_messages(source_chat, ids=source_msg_id)
                         if orig_msg and orig_msg.media:
                             try:
-                                # 1. Tenta envio direto via servidor
-                                await client.send_file(chat_entity, orig_msg.media, caption=caption if caption else orig_msg.text)
+                                # 1. Tenta envio direto via servidor com barra de progresso
+                                tracker_up = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "🚀 Enviando Vídeo para o Canal VIP")
+                                await client.send_file(chat_entity, orig_msg.media, caption=caption if caption else orig_msg.text, progress_callback=tracker_up.callback)
                                 published_via_telethon = True
                             except Exception as send_err:
                                 # 2. Se o canal tiver Proteção de Conteúdo (Content Protection/noforwards) ativada pelo dono:
-                                # Baixa o arquivo de mídia temporariamente e envia o arquivo do vídeo para o canal VIP!
                                 err_msg_str = str(send_err).lower()
                                 if "protected" in err_msg_str or "noforwards" in err_msg_str or "restricted" in err_msg_str or "forward" in err_msg_str:
                                     logging.info("Canal protegido contra cópia detectado. Baixando mídia temporariamente para re-upload no VIP...")
                                     temp_dir = os.path.join(os.path.dirname(__file__), "..", "temp_vip_downloads")
                                     os.makedirs(temp_dir, exist_ok=True)
                                     
-                                    downloaded_path = await client.download_media(orig_msg, file=temp_dir)
+                                    tracker_down = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "⏬ Baixando Vídeo de Canal Protegido")
+                                    downloaded_path = await client.download_media(orig_msg, file=temp_dir, progress_callback=tracker_down.callback)
+                                    
                                     if downloaded_path and os.path.exists(downloaded_path):
-                                        await client.send_file(chat_entity, downloaded_path, caption=caption if caption else orig_msg.text)
+                                        tracker_reup = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "🚀 Enviando Vídeo para o Canal VIP")
+                                        await client.send_file(chat_entity, downloaded_path, caption=caption if caption else orig_msg.text, progress_callback=tracker_reup.callback)
                                         published_via_telethon = True
                                         try:
                                             os.remove(downloaded_path)
@@ -664,6 +717,7 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                             error_reason = "A mensagem no link de origem não contém um arquivo de mídia/vídeo ou a conta do Telethon não possui acesso ao canal de origem."
                     except Exception as msg_err:
                         error_reason = f"Erro ao acessar a mensagem no canal de origem: {msg_err}"
+
 
 
                 elif video_file_id or (msg_obj and (msg_obj.video or msg_obj.document)):
