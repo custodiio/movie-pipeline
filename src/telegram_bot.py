@@ -988,8 +988,7 @@ async def handle_produce_confirm_callback(update: Update, context: ContextTypes.
         tmdb_id = candidate.get("id")
         await query.edit_message_text(f"⏳ Processando metadados do filme (ID {tmdb_id})...")
         movie_info = get_movie_by_tmdb_id(tmdb_id, language="pt-BR")
-        await run_pipeline_execution(query, context, movie_info)
-        return ConversationHandler.END
+        return await run_pipeline_execution(query, context, movie_info)
 
     elif data == "prod_manual_title":
         await query.edit_message_text(
@@ -1045,8 +1044,8 @@ async def handle_produce_select_movie_callback(update: Update, context: ContextT
         tmdb_id = int(data.split(":")[1])
         await query.edit_message_text(f"⏳ Processando metadados do filme (ID {tmdb_id})...")
         movie_info = get_movie_by_tmdb_id(tmdb_id, language="pt-BR")
-        await run_pipeline_execution(query, context, movie_info)
-        return ConversationHandler.END
+        return await run_pipeline_execution(query, context, movie_info)
+
 
     elif data == "cancel_post":
         await query.edit_message_text("❌ Produção cancelada.")
