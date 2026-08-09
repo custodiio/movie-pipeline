@@ -76,16 +76,22 @@ async def generate_pix_callback(update: Update, context: ContextTypes.DEFAULT_TY
     user = update.effective_user
     await query.edit_message_text("⏳ **Gerando seu código PIX seguro na SyncPay... Por favor, aguarde a chave Copia e Cola.**", parse_mode="Markdown")
 
-    client_name = user.full_name or "Cliente Telegram"
-    client_email = f"user{user.id}@telegram.com"
+    client_name = user.full_name if user.full_name else f"Cliente_{user.id}"
+    username_str = f"_{user.username}" if user.username else ""
+    client_email = f"user{user.id}{username_str}@telegram.com".replace("_", "")
+
+    # Tenta usar o telefone real capturado do usuário ou envia None para usar a sanitização dinâmica
+    client_phone = context.user_data.get("user_phone", None)
 
     # Gera o PIX na API SyncPay
     pix_res = create_pix_cashin(
         amount=10.00,
         description="Acesso VIP Tela Cheia Filmes",
         client_name=client_name,
-        client_email=client_email
+        client_email=client_email,
+        client_phone=client_phone
     )
+
 
 
     if not pix_res.get("success"):
