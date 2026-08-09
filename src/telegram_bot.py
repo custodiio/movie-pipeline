@@ -2242,20 +2242,72 @@ async def handle_youtube_execute_upload_callback(update: Update, context: Contex
     guide = context.user_data.get("yt_guide", {})
     video_path = context.user_data.get("yt_video_path", "")
     thumb_path = context.user_data.get("yt_thumb_path")
+    movie_title = movie_info.get("title", "Filme")
 
-    await query.edit_message_text("⏳ <b>Fazendo upload do vídeo e thumbnail para o YouTube (Privado)... Por favor, aguarde.</b>", parse_mode="HTML")
+    # Envia a mensagem inicial de acompanhamento do upload
+    status_msg = await query.message.reply_text(
+        f"⏳ <b>Iniciando upload de '{movie_title}' para o YouTube (Privado)...</b>\n"
+        f"📦 Tamanho do Vídeo: <code>{os.path.getsize(video_path) / (1024*1024):.1f} MB</code>\n"
+        f"📊 Progresso: <code>[░░░░░░░░░░] 0%</code>",
+        parse_mode="HTML"
+    )
+
+    loop = context.application.loop
+    last_edit = 0
+
+    def yt_progress_cb(pct, current_bytes, total_bytes):
+        nonlocal last_edit
+        now = time.time()
+        if now - last_edit < 3 and pct < 100:
+            return
+        last_edit = now
+
+        curr_mb = current_bytes / (1024 * 1024)
+        tot_mb = total_bytes / (1024 * 1024) if total_bytes else 0
+        filled = int(pct / 10)
+        bar = "█" * filled + "░" * (10 - filled)
+
+        text = (
+            f"📤 <b>ENVIANDO VÍDEO PARA O YOUTUBE (PRIVADO)...</b>\n\n"
+            f"🎬 <b>Filme:</b> {movie_title}\n"
+            f"📊 <b>Progresso:</b> <code>[{bar}] {pct:.1f}%</code>\n"
+            f"📦 <b>Enviado:</b> <code>{curr_mb:.1f} MB / {tot_mb:.1f} MB</code>"
+        )
+
+        async def _do_edit():
+            try:
+                await context.bot.edit_message_text(
+                    chat_id=status_msg.chat_id,
+                    message_id=status_msg.message_id,
+                    text=text,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logging.warning(f"Aviso edicao progresso yt: {e}")
+
+        try:
+            if loop and loop.is_running():
+                asyncio.run_coroutine_threadsafe(_do_edit(), loop)
+            else:
+                asyncio.create_task(_do_edit())
+        except Exception as err:
+            logging.error(f"Erro agendamento progresso yt: {err}")
 
     from src.youtube_uploader import upload_video_to_youtube
     from src.database import mark_as_posted
 
-    res = upload_video_to_youtube(
-        video_path=video_path,
-        title=guide.get("youtube_title", movie_info.get("title", "Vídeo")),
-        description=guide.get("description", ""),
-        tags=guide.get("tags", ""),
-        thumbnail_path=thumb_path,
-        privacy_status="private"
-    )
+    def _do_upload_thread():
+        return upload_video_to_youtube(
+            video_path=video_path,
+            title=guide.get("youtube_title", movie_info.get("title", "Vídeo")),
+            description=guide.get("description", ""),
+            tags=guide.get("tags", ""),
+            thumbnail_path=thumb_path,
+            privacy_status="private",
+            progress_callback=yt_progress_cb
+        )
+
+    res = await asyncio.to_thread(_do_upload_thread)
 
     if res.get("success"):
         tmdb_id = movie_info.get("id") or movie_info.get("tmdb_id")
@@ -2269,12 +2321,13 @@ async def handle_youtube_execute_upload_callback(update: Update, context: Contex
             f"🔗 <b>Link no YouTube:</b> {res.get('video_url')}\n\n"
             f"✅ Status do filme alterado para <code>posted</code> no banco de dados SQLite!"
         )
-        await query.message.reply_text(msg_success, parse_mode="HTML")
+        await status_msg.edit_text(msg_success, parse_mode="HTML")
     else:
         err = res.get("error", "Erro desconhecido")
-        await query.message.reply_text(f"❌ <b>Falha no upload para o YouTube:</b>\n<code>{err}</code>", parse_mode="HTML")
+        await status_msg.edit_text(f"❌ <b>Falha no upload para o YouTube:</b>\n<code>{err}</code>", parse_mode="HTML")
 
     return ConversationHandler.END
+
 
 
 

@@ -20,19 +20,13 @@ def upload_video_to_youtube(
     description: str,
     tags: Union[str, List[str]],
     thumbnail_path: str = None,
-    privacy_status: str = "private"
+    privacy_status: str = "private",
+    progress_callback = None
 ) -> Dict[str, Any]:
     """
     Realiza o upload do vídeo para o YouTube no modo Privado via API v3.
-
-    :param video_path: Caminho local do arquivo de vídeo MP4.
-    :param title: Título otimizado para SEO (máximo 100 caracteres).
-    :param description: Descrição completa com disclaimer e hashtags.
-    :param tags: Lista de tags ou string com tags separadas por vírgula.
-    :param thumbnail_path: Caminho local da thumbnail 16:9.
-    :param privacy_status: Status de privacidade ("private", "unlisted" ou "public").
-    :return: Dicionário contendo status do upload e URL do vídeo no YouTube.
     """
+    import time
     refresh_token = os.getenv("YOUTUBE_REFRESH_TOKEN") or os.getenv("DRIVE_REFRESH_TOKEN")
     client_id = os.getenv("YOUTUBE_CLIENT_ID") or os.getenv("DRIVE_CLIENT_ID")
     client_secret = os.getenv("YOUTUBE_CLIENT_SECRET") or os.getenv("DRIVE_CLIENT_SECRET")
@@ -42,7 +36,6 @@ def upload_video_to_youtube(
             "success": False,
             "error": "Credenciais Google OAuth (YOUTUBE_REFRESH_TOKEN, YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET) ausentes no .env"
         }
-
 
     if not os.path.exists(video_path):
         return {
@@ -85,10 +78,23 @@ def upload_video_to_youtube(
         request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
 
         response = None
+        last_progress_time = 0
+        file_size = os.path.getsize(video_path) if os.path.exists(video_path) else 0
+
         while response is None:
             status, response = request.next_chunk()
             if status:
-                logger.info(f"  --> Progresso Upload YouTube: {int(status.progress() * 100)}%")
+                pct = status.progress() * 100
+                logger.info(f"  --> Progresso Upload YouTube: {int(pct)}%")
+                if progress_callback:
+                    now = time.time()
+                    if now - last_progress_time >= 3 or pct >= 100:
+                        last_progress_time = now
+                        try:
+                            progress_callback(pct, getattr(status, 'resumable_progress', 0), getattr(status, 'total_size', file_size))
+                        except Exception as p_err:
+                            logger.warning(f"Aviso progress callback: {p_err}")
+
 
         video_id = response.get("id")
         video_url = f"https://youtu.be/{video_id}"
