@@ -766,32 +766,60 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
 
                                     if downloaded_path and os.path.exists(downloaded_path):
                                         file_size_mb = os.path.getsize(downloaded_path) / (1024 * 1024)
+                                        base_caption = caption if caption else (orig_msg.text if orig_msg.text else "Vídeo VIP")
+
                                         if file_size_mb > 2000:
-                                            logging.info(f"Arquivo de {file_size_mb:.1f} MB excede o limite de 2000 MB do Telegram. Otimizando via FFmpeg...")
-                                            tracker_opt = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, f"⚙️ Ajustando Tamanho do Vídeo de {file_size_mb:.1f} MB para < 2.0 GB")
-                                            compressed_path = downloaded_path.rsplit('.', 1)[0] + "_opt.mp4"
-                                            cmd = [
-                                                "ffmpeg", "-y", "-i", downloaded_path,
-                                                "-c:v", "libx264", "-crf", "25", "-preset", "fast",
-                                                "-c:a", "aac", "-b:a", "128k",
-                                                compressed_path
+                                            num_parts = 3 if file_size_mb > 4000 else 2
+                                            logging.info(f"Arquivo de {file_size_mb:.1f} MB excede 2000 MB. Dividindo em {num_parts} partes iguais via FFmpeg (-c copy)...")
+                                            
+                                            cmd_dur = [
+                                                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                                "-of", "default=noprint_wrappers=1:nokey=1", downloaded_path
                                             ]
-                                            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                                            await proc.communicate()
-                                            if os.path.exists(compressed_path) and os.path.getsize(compressed_path) > 0:
+                                            proc_dur = await asyncio.create_subprocess_exec(*cmd_dur, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                                            out_dur, _ = await proc_dur.communicate()
+                                            try:
+                                                duration = float(out_dur.decode().strip())
+                                            except Exception:
+                                                duration = 7200.0
+
+                                            part_duration = duration / num_parts
+                                            split_parts = []
+
+                                            for i in range(num_parts):
+                                                start_t = i * part_duration
+                                                out_p = downloaded_path.rsplit('.', 1)[0] + f"_parte_{i+1}_de_{num_parts}.mkv"
+                                                cmd_split = [
+                                                    "ffmpeg", "-y", "-ss", str(start_t), "-i", downloaded_path,
+                                                    "-t", str(part_duration), "-c", "copy", out_p
+                                                ]
+                                                proc_sp = await asyncio.create_subprocess_exec(*cmd_split, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+                                                await proc_sp.communicate()
+                                                if os.path.exists(out_p) and os.path.getsize(out_p) > 0:
+                                                    split_parts.append((i+1, num_parts, out_p))
+
+                                            for p_idx, p_total, p_path in split_parts:
+                                                part_caption = f"{base_caption}\n\n📌 **Parte {p_idx} de {p_total}**"
+                                                tracker_reup = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, f"🚀 Enviando Parte {p_idx}/{p_total} para o Canal VIP")
+                                                await client.send_file(chat_entity, p_path, caption=part_caption, progress_callback=tracker_reup.callback, supports_streaming=True)
                                                 try:
-                                                    os.remove(downloaded_path)
+                                                    os.remove(p_path)
                                                 except Exception:
                                                     pass
-                                                downloaded_path = compressed_path
+                                            published_via_telethon = True
+                                            try:
+                                                os.remove(downloaded_path)
+                                            except Exception:
+                                                pass
+                                        else:
+                                            tracker_reup = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "🚀 Enviando Vídeo para o Canal VIP")
+                                            await client.send_file(chat_entity, downloaded_path, caption=base_caption, progress_callback=tracker_reup.callback, supports_streaming=True)
+                                            published_via_telethon = True
+                                            try:
+                                                os.remove(downloaded_path)
+                                            except Exception:
+                                                pass
 
-                                        tracker_reup = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "🚀 Enviando Vídeo para o Canal VIP")
-                                        await client.send_file(chat_entity, downloaded_path, caption=caption if caption else orig_msg.text, progress_callback=tracker_reup.callback)
-                                        published_via_telethon = True
-                                        try:
-                                            os.remove(downloaded_path)
-                                        except Exception:
-                                            pass
 
                                     else:
                                         error_reason = "Não foi possível baixar a mídia do canal protegido."
