@@ -55,8 +55,9 @@ def upload_video_to_youtube(
             client_id=client_id,
             client_secret=client_secret,
             token_uri="https://oauth2.googleapis.com/token",
-            scopes=["https://www.googleapis.com/auth/youtube.upload"]
+            scopes=None
         )
+
 
         youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
 
