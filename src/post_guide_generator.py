@@ -9,6 +9,7 @@ import logging
 import requests
 import re
 from src.tmdb_client import TMDB_API_KEY, BASE_URL, get_headers
+from src.script_generator import generate_llm_text
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -38,8 +39,8 @@ def get_movie_credits_tmdb(movie_id: int) -> dict:
 
 def generate_youtube_post_guide(movie_info: dict, custom_title: str = None) -> dict:
     """
-    Gera o Guia Completo de Postagem do YouTube:
-    - Título de Captura
+    Gera o Guia Completo de Postagem do YouTube adaptado via IA:
+    - Título de Captura com gancho
     - Descrição Formatada Padrão com Elenco, Diretor, CTAs e Disclaimer
     - Tags Relevantes em Alta (separadas por vírgula)
     """
@@ -48,10 +49,31 @@ def generate_youtube_post_guide(movie_info: dict, custom_title: str = None) -> d
     tmdb_id = movie_info.get("tmdb_id")
     slug = movie_info.get("slug", "filme")
     year = (movie_info.get("release_date") or "")[:4] or "2026"
+    overview = movie_info.get("overview", "")
 
     credits = get_movie_credits_tmdb(tmdb_id) if tmdb_id else {"cast": [], "director": ""}
     cast_str = ", ".join(credits["cast"]) if credits["cast"] else "um elenco estelar"
     director_str = credits["director"] if credits["director"] else "grandes nomes do cinema"
+
+    # Tenta adaptação avançada via IA
+    ai_adapted_para = ""
+    if overview:
+        try:
+            prompt_ai = f"""Adapte os 2 parágrafos de apresentação para a análise do filme no YouTube:
+Título: {title} ({orig_title})
+Lançamento: {year}
+Sinopse: {overview}
+Elenco: {cast_str}
+Direção: {director_str}
+
+Siga ESTREITAMENTE o formato dos 2 parágrafos:
+Parágrafo 1: "Neste vídeo, destrinchamos cada detalhe do mais novo e aguardado lançamento de {year}: {title} ({orig_title}). Prepare-se para análises profundas, teorias, a explicação do final e todas as informações sobre esse grande filme!"
+Parágrafo 2: "Acompanhe a história eletrizante estrelada por {cast_str}, sob a direção de {director_str}. Quando segredos misteriosos vêm à tona e a tensão atinge o seu limite, os personagens precisam encarar dilemas profundos e confrontar o inevitável em uma trama cheia de reviravoltas."
+
+Retorne os 2 parágrafos adaptados mantendo a riqueza de detalhes da sinopse."""
+            ai_adapted_para = generate_llm_text(prompt_ai, system_instruction="Você é um especialista em Copywriting Cinematográfico de Alta Conversão.")
+        except Exception as e:
+            logging.warning(f"Fallback local ativado para texto de descrição: {e}")
 
     # 1. Título do YouTube
     if custom_title and custom_title.strip():
@@ -82,10 +104,15 @@ def generate_youtube_post_guide(movie_info: dict, custom_title: str = None) -> d
 
     hashtags_str = " ".join(hashtags)
 
-    # 3. Descrição Padrão Estrita
-    description = f"""Neste vídeo, destrinchamos cada detalhe do mais novo e aguardado lançamento de {year}: {title} ({orig_title}). Prepare-se para análises profundas, teorias, a explicação do final e todas as informações sobre esse grande filme!
+    # 3. Corpo dos Parágrafos (IA ou Template Padrão)
+    if ai_adapted_para and len(ai_adapted_para) > 50:
+        base_body = ai_adapted_para.strip()
+    else:
+        base_body = f"""Neste vídeo, destrinchamos cada detalhe do mais novo e aguardado lançamento de {year}: {title} ({orig_title}). Prepare-se para análises profundas, teorias, a explicação do final e todas as informações sobre esse grande filme!
 
-Acompanhe a história eletrizante estrelada por {cast_str}, sob a direção de {director_str}. Quando segredos misteriosos vêm à tona e a tensão atinge o seu limite, os personagens precisam encarar dilemas profundos e confrontar o inevitável em uma trama cheia de reviravoltas.
+Acompanhe a história eletrizante estrelada por {cast_str}, sob a direção de {director_str}. Quando segredos misteriosos vêm à tona e a tensão atinge o seu limite, os personagens precisam encarar dilemas profundos e confrontar o inevitável em uma trama cheia de reviravoltas."""
+
+    description = f"""{base_body}
 
 🔔 INSCREVA-SE no canal e ative o sininho para não perder nenhuma crítica, análise e novidade sobre o cinema e as séries de streaming!
 👍 Deixe seu LIKE se este conteúdo te ajudou a entender todos os detalhes do filme!
@@ -95,6 +122,7 @@ Acompanhe a história eletrizante estrelada por {cast_str}, sob a direção de {
 
 ⚠️ Disclaimer:
 All rights to images, soundtracks, and film excerpts belong to their respective owners. The use of copyrighted material is done in accordance with the principle of fair use, for the purpose of criticism, commentary, and analysis, as permitted by applicable law."""
+
 
     # 4. Tags Relevantes em Alta (separadas por vírgula)
     tags_list = [

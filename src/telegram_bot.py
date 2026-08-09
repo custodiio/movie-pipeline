@@ -1489,8 +1489,12 @@ def create_telegram_bot_app() -> Application:
     conv_produce_movie = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Regex(r"^🎬 Produzir Filme \(Pipeline\)$"), initiate_produce_movie),
-            CommandHandler("produzir", initiate_produce_movie)
+            CommandHandler("produzir", initiate_produce_movie),
+            CommandHandler("thumb", initiate_produce_movie),
+            CommandHandler("capa", initiate_produce_movie),
+            CommandHandler("guia", initiate_produce_movie)
         ],
+
 
         states={
             STATE_PRODUCE_CONFIRM: [
