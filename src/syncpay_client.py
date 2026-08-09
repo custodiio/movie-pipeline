@@ -62,7 +62,7 @@ def create_pix_cashin(
     client_name: str = "Cliente Telegram",
     client_cpf: str = "12345678900",
     client_email: str = "cliente@telegram.com",
-    client_phone: str = "64992430964",
+    client_phone: str = None,
     webhook_url: str = None
 ) -> dict:
     """
@@ -80,6 +80,9 @@ def create_pix_cashin(
         "Accept": "application/json"
     }
 
+    if not client_phone:
+        client_phone = os.getenv("DEFAULT_CLIENT_PHONE", "11999999999")
+
     # Sanitização básica do CPF (somente dígitos, 11 caracteres)
     clean_cpf = "".join(filter(str.isdigit, str(client_cpf)))
     if len(clean_cpf) != 11:
@@ -90,7 +93,8 @@ def create_pix_cashin(
     if len(clean_phone) > 11:
         clean_phone = clean_phone[-11:]
     elif len(clean_phone) < 10:
-        clean_phone = "64992430964"
+        clean_phone = "11999999999"
+
 
 
     payload = {

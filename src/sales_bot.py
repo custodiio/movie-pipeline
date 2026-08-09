@@ -29,13 +29,13 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 SALES_BOT_TOKEN = os.getenv("SALES_BOT_TOKEN")
 
 
-raw_vip_id = os.getenv("TELEGRAM_VIP_CHANNEL_ID", "-1003917174917")
+raw_vip_id = os.getenv("TELEGRAM_VIP_CHANNEL_ID", "0")
 try:
     TELEGRAM_VIP_CHANNEL_ID = int(raw_vip_id)
 except ValueError:
     TELEGRAM_VIP_CHANNEL_ID = raw_vip_id
 
-ADMIN_CHAT_ID = int(os.getenv("TELEGRAM_ADMIN_ID", "64992430964"))
+ADMIN_CHAT_ID = int(os.getenv("TELEGRAM_ADMIN_ID", "0"))
 
 STATE_IDLE = 0
 STATE_WAITING_PAYMENT = 1
@@ -84,9 +84,9 @@ async def generate_pix_callback(update: Update, context: ContextTypes.DEFAULT_TY
         amount=10.00,
         description="Acesso VIP Tela Cheia Filmes",
         client_name=client_name,
-        client_email=client_email,
-        client_phone="64992430964"
+        client_email=client_email
     )
+
 
     if not pix_res.get("success"):
         error_msg = pix_res.get("error", "Erro desconhecido")

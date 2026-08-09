@@ -65,12 +65,13 @@ Tabela `movies`:
   - Workflow automatizado do GitHub Actions que configura o Kaggle CLI, roda o `inject_secrets.py` e executa o `kaggle kernels push` com acelerador GPU Tesla T4.
 - **`notebooks/movie_pipeline_master.ipynb`**:
   - Notebook mestre parametrizado com Célula 1b dedicada à subida dos Servidores OmniVoice (GPU0 + GPU1) e renderização NVENC ultra-rápida.
-- **`src/syncpay_client.py`**:
-  - Módulo cliente oficial da API SyncPay (`https://api.syncpayments.com.br`).
-  - Gerencia a autenticação via Bearer Token com cache automático de 1h, solicitação de depósitos PIX Cash-In (`create_pix_cashin`) com validação de CPF e telefone, e consulta de status de transações (`check_transaction_status`).
 - **`src/sales_bot.py`**:
   - Bot dedicado de Vendas Automáticas via PIX SyncPay (`@telacheiafilmes_bot`).
-  - Recebe o token exclusivamente do `.env` (`SALES_BOT_TOKEN`), configura automaticamente a mensagem de saudação de boas-vindas exibida na tela antes de clicar em START (`set_my_description`), gera a chave PIX Copia e Cola instantaneamente no valor de R$ 10,00, exibe botões de **Suporte Humano** (`https://t.me/leh_lurdes`), monitora a confirmação do pagamento no banco a cada 10 segundos e gera o link de convite exclusivo para o canal VIP (`TELEGRAM_VIP_CHANNEL_ID`), notificando o cliente e o administrador (`ADMIN_CHAT_ID`).
+  - Lida 100% via `.env` (sem nenhum valor padrão hardcodado), configura a mensagem de saudação de boas-vindas exibida na tela antes de clicar em START (`set_my_description`), gera a chave PIX Copia e Cola instantaneamente no valor de R$ 10,00, exibe botões de **Suporte Humano** (`https://t.me/leh_lurdes`), monitora a confirmação do pagamento no banco a cada 10 segundos e gera o link de convite exclusivo para o canal VIP (`TELEGRAM_VIP_CHANNEL_ID`), notificando o cliente e o administrador (`ADMIN_CHAT_ID`).
+- **`src/syncpay_client.py`**:
+  - Módulo cliente oficial da API SyncPay (`https://api.syncpayments.com.br`).
+  - Sanitizado e limpo de qualquer dado pessoal ou telefone hardcodado. Gerencia a autenticação via Bearer Token com cache automático de 1h, solicitação de depósitos PIX Cash-In (`create_pix_cashin`) e consulta de status de transações (`check_transaction_status`).
+
 - **`run_sales_bot.py`**:
   - Script principal na raiz para inicialização e execução contínua do Bot de Vendas `@telacheiafilmes_bot` em segundo plano.
 
