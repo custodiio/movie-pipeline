@@ -65,12 +65,21 @@ Tabela `movies`:
   - Workflow automatizado do GitHub Actions que configura o Kaggle CLI, roda o `inject_secrets.py` e executa o `kaggle kernels push` com acelerador GPU Tesla T4.
 - **`notebooks/movie_pipeline_master.ipynb`**:
   - Notebook mestre parametrizado com Célula 1b dedicada à subida dos Servidores OmniVoice (GPU0 + GPU1) e renderização NVENC ultra-rápida.
+- **`src/syncpay_client.py`**:
+  - Módulo cliente oficial da API SyncPay (`https://api.syncpayments.com.br`).
+  - Gerencia a autenticação via Bearer Token com cache automático de 1h, solicitação de depósitos PIX Cash-In (`create_pix_cashin`) com validação de CPF e telefone, e consulta de status de transações (`check_transaction_status`).
+- **`src/sales_bot.py`**:
+  - Bot dedicado de Vendas Automáticas via PIX SyncPay (`@telacheiafilmes_bot`).
+  - Recebe comandos de compra, gera a chave PIX Copia e Cola instantaneamente, monitora a confirmação do pagamento no banco a cada 10 segundos e gera o link de convite exclusivo para o canal VIP (`TELEGRAM_VIP_CHANNEL_ID`), notificando o cliente e o administrador (`ADMIN_CHAT_ID`).
+- **`run_sales_bot.py`**:
+  - Script principal na raiz para inicialização e execução contínua do Bot de Vendas `@telacheiafilmes_bot` em segundo plano.
 - **`src/telegram_bot.py`**:
-  - Módulo assíncrono do Bot do Telegram para automação de vendas e postagens.
-  - **Fluxo 1 (Canal Público `@dramasleh`)**: Busca filmes no TMDB por nome, filtra e organiza galeria de imagens priorizando 1º Pôster em Português (`pt-BR`), 2º Pôster em Inglês (`en-US`), 3º e 4º Imagens Variadas, com navegação de lotes via `🔄 Exibir Mais Imagens` e controle de seleção interativo (`all_images_data`). Gera Copy de Vendas persuasiva por IA (cadeia de fallbacks) com botão Inline `🔒 Solicitar Acesso (R$ 5,00)` redirecionando com espaços em branco limpos (`quote_plus`) direto para o chat privado `@leh_lurdes` (`https://t.me/leh_lurdes?text=...`), publicando no canal `@dramasleh` (`TELEGRAM_CHANNEL_ID`).
+  - Módulo assíncrono do Bot Admin do Telegram (`@TelaCheiaadmin_bot`) para automação de postagens.
+  - **Fluxo 1 (Canal Público `@dramasleh`)**: Busca filmes no TMDB por nome, filtra e organiza galeria de imagens priorizando 1º Pôster em Português (`pt-BR`), 2º Pôster em Inglês (`en-US`), 3º e 4º Imagens Variadas, com navegação de lotes via `🔄 Exibir Mais Imagens` e controle de seleção interativo (`all_images_data`). Gera Copy de Vendas persuasiva por IA com botão Inline `🔒 Solicitar Acesso (R$ 5,00)` redirecionando para o Bot de Vendas `@telacheiafilmes_bot` (`https://t.me/telacheiafilmes_bot?start=comprar_vip`), publicando no canal `@dramasleh` (`TELEGRAM_CHANNEL_ID`).
   - **Fluxo 2 (Canal VIP)**: Publicação ultra-rápida em menos de 1 segundo utilizando o cliente nativo **Telethon MTProto** (`send_file`) com a sessão do `DailymotionAgent` para o ID numérico do canal VIP privado (`-1003917174917`). Detecta e exibe a legenda original em tempo real via Telethon ao receber links (`https://t.me/c/3917174917/...`) e suporta edição interativa de legenda (`STATE_EDIT_VIP_TITLE`).
 - **`run_bot.py`**:
-  - Script principal na raiz para inicialização e execução contínua do Bot do Telegram em segundo plano.
+  - Script principal na raiz para inicialização e execução contínua do Bot Admin do Telegram em segundo plano.
+
 - **`main.py`**:
   - Orquestrador principal da aplicação na VPS. Invoca as funções de cada etapa do pipeline em sequência.
 

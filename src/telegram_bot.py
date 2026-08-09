@@ -53,18 +53,11 @@ TELEGRAM_SALES_USERNAME = os.getenv("TELEGRAM_SALES_USERNAME", "leh_lurdes").rep
 
 def build_sales_link(movie_title: str = None) -> str:
     """
-    Gera o link de vendas do Telegram (https://t.me/leh_lurdes?text=...).
-    Usa quote_plus para garantir que os espaços apareçam perfeitamente limpos como espaços em branco,
-    sem exibir o código '%20' impresso na mensagem.
+    Gera o link de vendas do Telegram direcionando para o Bot de Vendas Automático SyncPay (@telacheiafilmes_bot).
     """
-    username = os.getenv("TELEGRAM_SALES_USERNAME", "leh_lurdes").replace("@", "")
-    if movie_title:
-        msg = f"Olá, gostaria de solicitar o acesso ao filme do {movie_title.title()}!"
-    else:
-        msg = "Olá, gostaria de solicitar o acesso ao filme!"
-    
-    encoded_text = urllib.parse.quote_plus(msg)
-    return f"https://t.me/{username}?text={encoded_text}"
+    bot_username = os.getenv("SALES_BOT_USERNAME", "telacheiafilmes_bot").replace("@", "")
+    return f"https://t.me/{bot_username}?start=comprar_vip"
+
 
 # Estados da Conversa para Criar Postagem no Canal Público
 STATE_SEARCH_MOVIE, STATE_SELECT_MOVIE, STATE_SELECT_IMAGES, STATE_PREVIEW_POST, STATE_EDIT_COPY = range(5)
