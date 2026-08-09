@@ -50,7 +50,69 @@ except ValueError:
     TELEGRAM_VIP_CHANNEL_ID = raw_vip_id
 
 
+class TelethonProgressTracker:
+    """
+    Rastreia o progresso de download/upload do Telethon e atualiza a mensagem no chat em tempo real.
+    Calcula % concluído, MB/s de velocidade e barra de progresso visual.
+    """
+    def __init__(self, context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int, action_title: str):
+        self.context = context
+        self.chat_id = chat_id
+        self.message_id = message_id
+        self.action_title = action_title
+        self.start_time = time.time()
+        self.last_update_time = 0
+
+    def callback(self, current: int, total: int):
+        now = time.time()
+        # Atualiza a cada 2.5s para evitar Rate Limit do Telegram (429)
+        if now - self.last_update_time < 2.5 and current < total:
+            return
+        self.last_update_time = now
+
+        elapsed = now - self.start_time
+        speed_bytes = current / elapsed if elapsed > 0 else 0
+        speed_mb = speed_bytes / (1024 * 1024)
+        pct = (current / total * 100) if total > 0 else 0
+
+        bar_length = 10
+        filled = int(bar_length * current // total) if total > 0 else 0
+        bar = '█' * filled + '░' * (bar_length - filled)
+
+        curr_mb = current / (1024 * 1024)
+        tot_mb = total / (1024 * 1024)
+
+        text = (
+            f"⚡ <b>{self.action_title}...</b>\n\n"
+            f"📊 <b>Progresso:</b> <code>[{bar}] {pct:.1f}%</code>\n"
+            f"📦 <b>Tamanho:</b> <code>{curr_mb:.1f} MB / {tot_mb:.1f} MB</code>\n"
+            f"🚀 <b>Velocidade:</b> <code>{speed_mb:.2f} MB/s</code>"
+        )
+
+        async def _do_edit():
+            try:
+                await self.context.bot.edit_message_text(
+                    chat_id=self.chat_id,
+                    message_id=self.message_id,
+                    text=text,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logging.warning(f"Tracker edit warning: {e}")
+
+        try:
+            loop = self.context.application.loop
+            if loop and loop.is_running():
+                asyncio.run_coroutine_threadsafe(_do_edit(), loop)
+            else:
+                asyncio.create_task(_do_edit())
+        except Exception as err:
+            logging.error(f"Erro no agendamento do tracker: {err}")
+
+
+
 TELEGRAM_SALES_USERNAME = os.getenv("TELEGRAM_SALES_USERNAME", "leh_lurdes").replace("@", "")
+
 
 def build_sales_link(movie_title: str = None) -> str:
     """

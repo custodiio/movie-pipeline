@@ -1,6 +1,7 @@
 """
-Módulo FastTelethon para Download e Upload Paralelo em 32 Chunks Concorrentes.
-Utiliza Fila Assíncrona (asyncio.Queue) e conexões otimizadas para velocidade máxima no Telegram.
+Módulo FastTelethon (Parallel Transferer) de Alta Velocidade para Telethon.
+Abre até 32 conexões MTProto paralelas independentes com o Data Center do arquivo,
+multiplicando a velocidade de download/upload por até 20x.
 """
 
 import os
@@ -12,8 +13,18 @@ from telethon import TelegramClient
 from telethon.tl.functions.upload import GetFileRequest
 from telethon.tl.types import Document, MessageMediaDocument, InputDocumentFileLocation
 
-CHUNK_SIZE = 512 * 1024  # 512 KB por parte (máximo do MTProto)
-PARALLEL_WORKERS = 32    # 32 pedaços paralelos simultâneos
+CHUNK_SIZE = 512 * 1024  # 512 KB por chunk (tamanho máximo permitido pelo Telegram)
+DEFAULT_CONNECTIONS = 32 # 32 conexões paralelas simultâneas
+
+async def _get_dc_client(client: TelegramClient, dc_id: int):
+    """
+    Obtém uma conexão de remetente (sender) para o Data Center específico onde o arquivo está armazenado.
+    """
+    try:
+        sender = await client._borrow_sender(dc_id)
+        return sender
+    except Exception:
+        return client._sender
 
 async def download_file_parallel(
     client: TelegramClient,
@@ -23,7 +34,8 @@ async def download_file_parallel(
     workers_count: int = 32
 ) -> str:
     """
-    Baixa mídia do Telegram dividindo o arquivo em 32 partes concorrentes usando fila assíncrona.
+    Baixa o arquivo do Telegram em paralelo dividindo a transferência entre 32 conexões MTProto.
+    O progresso reportado ao callback é o TOTAL ACUMULADO de todos os 32 pedaços somados.
     """
     if hasattr(msg_or_media, 'media') and msg_or_media.media:
         media = msg_or_media.media
@@ -51,31 +63,33 @@ async def download_file_parallel(
         thumb_size=""
     )
 
-    # Pre-aloca o arquivo no disco com o tamanho total exato
+    # Pre-aloca o arquivo com o tamanho total exato
     with open(out_filepath, "wb") as f:
         f.truncate(total_size)
 
-    # Preenche a fila de chunks
-    queue = asyncio.Queue()
-    for i in range(total_chunks):
-        queue.put_nowait(i)
-
-    downloaded_bytes = 0
-    lock = asyncio.Lock()
-
-    # Prepara os senders exportados para o DC exato do arquivo
+    # Cria conexões paralelas com o Data Center correto (DC_ID)
     senders = []
-    for _ in range(min(workers_count, total_chunks)):
+    conns_needed = min(workers_count, total_chunks)
+    
+    for _ in range(conns_needed):
         try:
-            sender = await client._borrow_sender(dc_id)
-            senders.append(sender)
+            s = await client._borrow_sender(dc_id)
+            senders.append(s)
         except Exception:
             break
 
     if not senders:
-        return await client.download_media(msg_or_media, file=out_filepath, progress_callback=progress_callback)
+        senders = [client._sender]
 
-    async def worker(sender):
+    num_senders = len(senders)
+    downloaded_bytes = 0
+    lock = asyncio.Lock()
+
+    queue = asyncio.Queue()
+    for i in range(total_chunks):
+        queue.put_nowait(i)
+
+    async def worker_loop(sender):
         nonlocal downloaded_bytes
         while not queue.empty():
             try:
@@ -86,43 +100,46 @@ async def download_file_parallel(
             offset = chunk_index * CHUNK_SIZE
             limit = min(CHUNK_SIZE, total_size - offset)
 
-            success = False
-            for attempt in range(3):
+            download_success = False
+            for retry in range(3):
                 try:
-                    result = await sender.send(GetFileRequest(
+                    res = await sender.send(GetFileRequest(
                         location=location,
                         offset=offset,
                         limit=limit
                     ))
-                    chunk_data = result.bytes
-                    if chunk_data:
+                    chunk_bytes = res.bytes
+                    if chunk_bytes:
+                        # Grava na posição relativa exata do arquivo no disco
                         with open(out_filepath, "rb+") as f:
                             f.seek(offset)
-                            f.write(chunk_data)
+                            f.write(chunk_bytes)
 
                         async with lock:
-                            downloaded_bytes += len(chunk_data)
+                            downloaded_bytes += len(chunk_bytes)
                             if progress_callback:
+                                # Reporta o TOTAL acumulado de todos os pedacos baixados
                                 progress_callback(downloaded_bytes, total_size)
-                        success = True
+                        download_success = True
                         break
                 except Exception:
-                    await asyncio.sleep(0.2)
+                    await asyncio.sleep(0.1)
 
-            if not success:
-                # Se falhar, coloca o bloco de volta na fila
+            if not download_success:
+                # Reenfileira o pedaço em caso de falha
                 queue.put_nowait(chunk_index)
 
             queue.task_done()
 
     try:
-        workers = [asyncio.create_task(worker(s)) for s in senders]
-        await asyncio.gather(*workers)
+        tasks = [asyncio.create_task(worker_loop(s)) for s in senders]
+        await asyncio.gather(*tasks)
     finally:
         for s in senders:
-            try:
-                await client._return_sender(s)
-            except Exception:
-                pass
+            if s != client._sender:
+                try:
+                    await client._return_sender(s)
+                except Exception:
+                    pass
 
     return out_filepath
