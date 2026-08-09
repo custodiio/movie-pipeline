@@ -159,6 +159,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_keyboard = [
         ["🎬 Produzir Filme (Pipeline)"],
         ["🖼️ Criar Thumbnail (Capa 16:9)", "📝 Gerar Guia de Postagem (IA)"],
+        ["📺 Postar no YouTube (Privado)"],
         ["📢 Criar Postagem de Venda", "🎥 Postar Vídeo no VIP"],
         ["ℹ️ Status dos Canais", "❓ Ajuda"]
     ]
@@ -1821,8 +1822,59 @@ def create_telegram_bot_app() -> Application:
     app.add_handler(MessageHandler(filters.Regex("^ℹ️ Status dos Canais$"), status_command))
     app.add_handler(MessageHandler(filters.Regex("^❓ Ajuda$"), help_command))
 
+        # ConversationHandler para Postar no YouTube (Privado)
+    conv_post_youtube = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex(r"^📺 Postar no YouTube \(Privado\)$"), initiate_youtube_upload_standalone),
+            CommandHandler("postar_youtube", initiate_youtube_upload_standalone),
+            CommandHandler("youtube", initiate_youtube_upload_standalone)
+        ],
+        states={
+            STATE_YT_SELECT_MOVIE: [
+                CallbackQueryHandler(handle_youtube_select_movie_callback, pattern="^(yt_sel_m_id:|cancel_post)$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_youtube_select_movie_callback)
+            ],
+            STATE_YT_CONFIRM_UPLOAD: [
+                CallbackQueryHandler(handle_youtube_execute_upload_callback, pattern="^(exec_yt_upload|cancel_post)$")
+            ]
+        },
+        fallbacks=[
+            CommandHandler("cancel", lambda u, c: ConversationHandler.END),
+            CommandHandler("start", start_command)
+        ],
+        allow_reentry=True,
+        per_message=False
+    )
+
+    app.add_handler(conv_post_youtube)
+    # ConversationHandler para Postar no YouTube (Privado)
+    conv_post_youtube = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex(r"^📺 Postar no YouTube \(Privado\)$"), initiate_youtube_upload_standalone),
+            CommandHandler("postar_youtube", initiate_youtube_upload_standalone),
+            CommandHandler("youtube", initiate_youtube_upload_standalone)
+        ],
+        states={
+            STATE_YT_SELECT_MOVIE: [
+                CallbackQueryHandler(handle_youtube_select_movie_callback, pattern="^(yt_sel_m_id:|cancel_post)$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_youtube_select_movie_callback)
+            ],
+            STATE_YT_CONFIRM_UPLOAD: [
+                CallbackQueryHandler(handle_youtube_execute_upload_callback, pattern="^(exec_yt_upload|cancel_post)$")
+            ]
+        },
+        fallbacks=[
+            CommandHandler("cancel", lambda u, c: ConversationHandler.END),
+            CommandHandler("start", start_command)
+        ],
+        allow_reentry=True,
+        per_message=False
+    )
+
+    app.add_handler(conv_post_youtube)
     app.add_handler(conv_produce_movie)
     app.add_handler(conv_thumb_only)
+
     app.add_handler(conv_guide_only)
     app.add_handler(conv_create_post)
     app.add_handler(conv_post_video)
@@ -1836,3 +1888,335 @@ if __name__ == "__main__":
     print("🤖 Iniciando Bot do Telegram Movie-Pipeline...")
     application = create_telegram_bot_app()
     application.run_polling()
+
+# ==============================================================================
+# FLUXO STANDALONE: POSTAGEM AUTOMÁTICA NO YOUTUBE (PRIVADO)
+# ==============================================================================
+
+async def initiate_youtube_upload_standalone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inicia o fluxo de postagem automática no YouTube no modo Privado."""
+    from src.database import get_connection
+    movies = []
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT tmdb_id, title, status FROM movies WHERE status IN ('concluido', 'selected', 'pending') ORDER BY tmdb_id DESC LIMIT 5")
+            movies = cursor.fetchall()
+    except Exception as e:
+        logging.error(f"Erro SQLite: {e}")
+
+    text = (
+        "📺 <b>PUBLICADOR AUTOMÁTICO DO YOUTUBE (PRIVADO)</b>\n\n"
+        "O robô enviará o vídeo MP4, a Thumbnail 16:9, Título SEO, Descrição Completa e Tags diretamente para o seu Canal do YouTube no modo <b>Privado</b>!\n\n"
+        "Selecione um dos filmes concluídos abaixo ou <b>digite o nome do filme</b> no chat:"
+    )
+
+    keyboard = []
+    for m in movies:
+        keyboard.append([InlineKeyboardButton(f"🎬 {m[1]} ({m[2].upper()})", callback_data=f"yt_sel_m_id:{m[0]}")])
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
+
+    markup = InlineKeyboardMarkup(keyboard)
+
+    if update.message:
+        await update.message.reply_text(text, reply_markup=markup, parse_mode="HTML")
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
+
+    return STATE_YT_SELECT_MOVIE
+
+
+async def handle_youtube_select_movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+        data = query.data
+        if data == "cancel_post":
+            await query.edit_message_text("❌ Operação cancelada.")
+            return ConversationHandler.END
+
+        tmdb_id = int(data.split(":")[1])
+        movie_info = get_movie_details(tmdb_id, language="pt-BR")
+    else:
+        user_text = update.message.text.strip()
+        msg_wait = await update.message.reply_text(f"🔍 Buscando '{user_text}' no TMDB...")
+        results = search_movies(user_text, language="pt-BR")
+        if not results:
+            await msg_wait.edit_text("❌ Nenhum filme encontrado. Digite outro nome:")
+            return STATE_YT_SELECT_MOVIE
+        movie_info = get_movie_details(results[0]["id"], language="pt-BR")
+
+    title_clean = movie_info.get("title", "")
+    slug = movie_info.get("slug") or movie_info.get("original_title", "").lower().replace(" ", "_")
+    context.user_data["yt_movie_info"] = movie_info
+    context.user_data["yt_slug"] = slug
+
+    # Prepara o Guia de Postagem
+    guide_data = generate_youtube_post_guide(movie_info)
+    context.user_data["yt_guide"] = guide_data
+
+    # Localiza o vídeo MP4 local ou faz download do Drive
+    video_path = f"output/{slug}.mp4"
+    if not os.path.exists(video_path):
+        os.makedirs(f"temp/{slug}", exist_ok=True)
+        drive = get_drive_service()
+        if drive:
+            drive_file = baixar_do_drive(drive, f"Movie-Pipeline/Projetos/{slug}/{slug}.mp4", f"temp/{slug}/{slug}.mp4")
+            if drive_file and os.path.exists(drive_file):
+                video_path = drive_file
+
+    context.user_data["yt_video_path"] = video_path
+
+    # Localiza a thumbnail PNG
+    thumb_path = f"temp/{slug}/thumbnail.png"
+    if not os.path.exists(thumb_path):
+        drive = get_drive_service()
+        if drive:
+            d_thumb = baixar_do_drive(drive, f"Movie-Pipeline/Projetos/{slug}/thumbnail.png", f"temp/{slug}/thumbnail.png")
+            if d_thumb and os.path.exists(d_thumb):
+                thumb_path = d_thumb
+
+    context.user_data["yt_thumb_path"] = thumb_path if os.path.exists(thumb_path) else None
+
+    has_video = os.path.exists(video_path)
+    preview_msg = (
+        f"📺 <b>PRÉVIA DA POSTAGEM NO YOUTUBE (PRIVADO)</b>\n\n"
+        f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
+        f"📌 <b>Título SEO:</b>\n<code>{guide_data['youtube_title']}</code>\n\n"
+        f"📄 <b>Descrição:</b>\n<code>{guide_data['description'][:300]}...</code>\n\n"
+        f"🏷️ <b>Tags:</b> <code>{guide_data['tags'][:100]}...</code>\n\n"
+        f"📁 <b>Vídeo MP4:</b> <code>{os.path.basename(video_path)}</code> ({'✅ Encontrado' if has_video else '⚠️ Não localizador (usará teste)'})\n"
+        f"🖼️ <b>Thumbnail 16:9:</b> {'✅ Presente' if context.user_data['yt_thumb_path'] else '⚠️ Ausente'}\n\n"
+        f"Clique no botão abaixo para publicar agora no YouTube em modo <b>PRIVADO</b>:"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("🚀 Confirmar Upload no YouTube (Privado)", callback_data="exec_yt_upload")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
+    ]
+
+    target = query.message if query else update.message
+    if context.user_data.get("yt_thumb_path"):
+        with open(context.user_data["yt_thumb_path"], "rb") as pf:
+            await target.reply_photo(photo=pf, caption=preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    else:
+        await target.reply_text(preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    return STATE_YT_CONFIRM_UPLOAD
+
+
+async def handle_youtube_execute_upload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if data == "cancel_post":
+        await query.edit_message_text("❌ Publicação no YouTube cancelada.")
+        return ConversationHandler.END
+
+    movie_info = context.user_data.get("yt_movie_info", {})
+    guide = context.user_data.get("yt_guide", {})
+    video_path = context.user_data.get("yt_video_path", "")
+    thumb_path = context.user_data.get("yt_thumb_path")
+
+    await query.edit_message_text("⏳ <b>Fazendo upload do vídeo e thumbnail para o YouTube (Privado)... Por favor, aguarde.</b>", parse_mode="HTML")
+
+    from src.youtube_uploader import upload_video_to_youtube
+    from src.database import mark_as_posted
+
+    res = upload_video_to_youtube(
+        video_path=video_path,
+        title=guide.get("youtube_title", movie_info.get("title", "Vídeo")),
+        description=guide.get("description", ""),
+        tags=guide.get("tags", ""),
+        thumbnail_path=thumb_path,
+        privacy_status="private"
+    )
+
+    if res.get("success"):
+        tmdb_id = movie_info.get("id") or movie_info.get("tmdb_id")
+        if tmdb_id:
+            mark_as_posted(tmdb_id)
+
+        msg_success = (
+            f"🎉 <b>VÍDEO PUBLICADO NO YOUTUBE COM SUCESSO!</b>\n\n"
+            f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
+            f"🔒 <b>Privacidade:</b> Privado (Draft)\n"
+            f"🔗 <b>Link no YouTube:</b> {res.get('video_url')}\n\n"
+            f"✅ Status do filme alterado para <code>posted</code> no banco de dados SQLite!"
+        )
+        await query.message.reply_text(msg_success, parse_mode="HTML")
+    else:
+        err = res.get("error", "Erro desconhecido")
+        await query.message.reply_text(f"❌ <b>Falha no upload para o YouTube:</b>\n<code>{err}</code>", parse_mode="HTML")
+
+    return ConversationHandler.END
+
+
+
+
+# ==============================================================================
+# FLUXO STANDALONE: POSTAGEM AUTOMÁTICA NO YOUTUBE (PRIVADO)
+# ==============================================================================
+
+async def initiate_youtube_upload_standalone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inicia o fluxo de postagem automática no YouTube no modo Privado."""
+    from src.database import get_connection
+    movies = []
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT tmdb_id, title, status FROM movies WHERE status IN ('concluido', 'selected', 'pending') ORDER BY tmdb_id DESC LIMIT 5")
+            movies = cursor.fetchall()
+    except Exception as e:
+        logging.error(f"Erro SQLite: {e}")
+
+    text = (
+        "📺 <b>PUBLICADOR AUTOMÁTICO DO YOUTUBE (PRIVADO)</b>\n\n"
+        "O robô enviará o vídeo MP4, a Thumbnail 16:9, Título SEO, Descrição Completa e Tags diretamente para o seu Canal do YouTube no modo <b>Privado</b>!\n\n"
+        "Selecione um dos filmes concluídos abaixo ou <b>digite o nome do filme</b> no chat:"
+    )
+
+    keyboard = []
+    for m in movies:
+        keyboard.append([InlineKeyboardButton(f"🎬 {m[1]} ({m[2].upper()})", callback_data=f"yt_sel_m_id:{m[0]}")])
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
+
+    markup = InlineKeyboardMarkup(keyboard)
+
+    if update.message:
+        await update.message.reply_text(text, reply_markup=markup, parse_mode="HTML")
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
+
+    return STATE_YT_SELECT_MOVIE
+
+
+async def handle_youtube_select_movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+        data = query.data
+        if data == "cancel_post":
+            await query.edit_message_text("❌ Operação cancelada.")
+            return ConversationHandler.END
+
+        tmdb_id = int(data.split(":")[1])
+        movie_info = get_movie_details(tmdb_id, language="pt-BR")
+    else:
+        user_text = update.message.text.strip()
+        msg_wait = await update.message.reply_text(f"🔍 Buscando '{user_text}' no TMDB...")
+        results = search_movies(user_text, language="pt-BR")
+        if not results:
+            await msg_wait.edit_text("❌ Nenhum filme encontrado. Digite outro nome:")
+            return STATE_YT_SELECT_MOVIE
+        movie_info = get_movie_details(results[0]["id"], language="pt-BR")
+
+    title_clean = movie_info.get("title", "")
+    slug = movie_info.get("slug") or movie_info.get("original_title", "").lower().replace(" ", "_")
+    context.user_data["yt_movie_info"] = movie_info
+    context.user_data["yt_slug"] = slug
+
+    # Prepara o Guia de Postagem
+    guide_data = generate_youtube_post_guide(movie_info)
+    context.user_data["yt_guide"] = guide_data
+
+    # Localiza o vídeo MP4 local ou faz download do Drive
+    video_path = f"output/{slug}.mp4"
+    if not os.path.exists(video_path):
+        os.makedirs(f"temp/{slug}", exist_ok=True)
+        drive = get_drive_service()
+        if drive:
+            drive_file = baixar_do_drive(drive, f"Movie-Pipeline/Projetos/{slug}/{slug}.mp4", f"temp/{slug}/{slug}.mp4")
+            if drive_file and os.path.exists(drive_file):
+                video_path = drive_file
+
+    context.user_data["yt_video_path"] = video_path
+
+    # Localiza a thumbnail PNG
+    thumb_path = f"temp/{slug}/thumbnail.png"
+    if not os.path.exists(thumb_path):
+        drive = get_drive_service()
+        if drive:
+            d_thumb = baixar_do_drive(drive, f"Movie-Pipeline/Projetos/{slug}/thumbnail.png", f"temp/{slug}/thumbnail.png")
+            if d_thumb and os.path.exists(d_thumb):
+                thumb_path = d_thumb
+
+    context.user_data["yt_thumb_path"] = thumb_path if os.path.exists(thumb_path) else None
+
+    has_video = os.path.exists(video_path)
+    preview_msg = (
+        f"📺 <b>PRÉVIA DA POSTAGEM NO YOUTUBE (PRIVADO)</b>\n\n"
+        f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
+        f"📌 <b>Título SEO:</b>\n<code>{guide_data['youtube_title']}</code>\n\n"
+        f"📄 <b>Descrição:</b>\n<code>{guide_data['description'][:300]}...</code>\n\n"
+        f"🏷️ <b>Tags:</b> <code>{guide_data['tags'][:100]}...</code>\n\n"
+        f"📁 <b>Vídeo MP4:</b> <code>{os.path.basename(video_path)}</code> ({'✅ Encontrado' if has_video else '⚠️ Não localizador (usará teste)'})\n"
+        f"🖼️ <b>Thumbnail 16:9:</b> {'✅ Presente' if context.user_data['yt_thumb_path'] else '⚠️ Ausente'}\n\n"
+        f"Clique no botão abaixo para publicar agora no YouTube em modo <b>PRIVADO</b>:"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("🚀 Confirmar Upload no YouTube (Privado)", callback_data="exec_yt_upload")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
+    ]
+
+    target = query.message if query else update.message
+    if context.user_data.get("yt_thumb_path"):
+        with open(context.user_data["yt_thumb_path"], "rb") as pf:
+            await target.reply_photo(photo=pf, caption=preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    else:
+        await target.reply_text(preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    return STATE_YT_CONFIRM_UPLOAD
+
+
+async def handle_youtube_execute_upload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    if data == "cancel_post":
+        await query.edit_message_text("❌ Publicação no YouTube cancelada.")
+        return ConversationHandler.END
+
+    movie_info = context.user_data.get("yt_movie_info", {})
+    guide = context.user_data.get("yt_guide", {})
+    video_path = context.user_data.get("yt_video_path", "")
+    thumb_path = context.user_data.get("yt_thumb_path")
+
+    await query.edit_message_text("⏳ <b>Fazendo upload do vídeo e thumbnail para o YouTube (Privado)... Por favor, aguarde.</b>", parse_mode="HTML")
+
+    from src.youtube_uploader import upload_video_to_youtube
+    from src.database import mark_as_posted
+
+    res = upload_video_to_youtube(
+        video_path=video_path,
+        title=guide.get("youtube_title", movie_info.get("title", "Vídeo")),
+        description=guide.get("description", ""),
+        tags=guide.get("tags", ""),
+        thumbnail_path=thumb_path,
+        privacy_status="private"
+    )
+
+    if res.get("success"):
+        tmdb_id = movie_info.get("id") or movie_info.get("tmdb_id")
+        if tmdb_id:
+            mark_as_posted(tmdb_id)
+
+        msg_success = (
+            f"🎉 <b>VÍDEO PUBLICADO NO YOUTUBE COM SUCESSO!</b>\n\n"
+            f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
+            f"🔒 <b>Privacidade:</b> Privado (Draft)\n"
+            f"🔗 <b>Link no YouTube:</b> {res.get('video_url')}\n\n"
+            f"✅ Status do filme alterado para <code>posted</code> no banco de dados SQLite!"
+        )
+        await query.message.reply_text(msg_success, parse_mode="HTML")
+    else:
+        err = res.get("error", "Erro desconhecido")
+        await query.message.reply_text(f"❌ <b>Falha no upload para o YouTube:</b>\n<code>{err}</code>", parse_mode="HTML")
+
+    return ConversationHandler.END
+
+
+
