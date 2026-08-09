@@ -428,8 +428,10 @@ async def handle_publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE
     movie = context.user_data.get("selected_movie", {})
 
     sales_link = build_sales_link(movie.get("title", ""))
-    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso (R$ 5,00)", url=sales_link)
-    markup = InlineKeyboardMarkup([[sales_button]])
+    sales_button = InlineKeyboardButton("🔒 Solicitar Acesso VIP (R$ 10,00)", url=sales_link)
+    support_button = InlineKeyboardButton("💬 Falar com Suporte", url="https://t.me/leh_lurdes")
+    markup = InlineKeyboardMarkup([[sales_button], [support_button]])
+
 
 
     try:

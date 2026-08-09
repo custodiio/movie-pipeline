@@ -213,7 +213,7 @@ FORMATO OBRIGATÓRIO (MANTENHA OS EMOJIS E O ESTILO EXATO DA ESTRUTURA):
 🍿 {title} 🍿
 
 LANÇAMENTO
-💰 Apenas R$ 5,00 (Acesso Único)
+💰 Apenas R$ 10,00 (Acesso Único)
 
 [Escreva aqui um parágrafo emocionante de 2 a 4 linhas chamando atenção para o filme, incentivando a reassistir ou assistir pela primeira vez em qualidade 4K ULTRA HD e dublado!]
 
@@ -222,7 +222,8 @@ LANÇAMENTO
 📬 Download liberado para assistir offline
 ⚡ Acesso vitalício e imediato ao canal privado
 
-💰 Apenas R$ 5,00 (Acesso Único)
+💰 Apenas R$ 10,00 (Acesso Único)
+
 
 REGRAS:
 1. Retorne APENAS o texto da postagem em português do Brasil.

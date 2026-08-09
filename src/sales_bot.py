@@ -49,13 +49,13 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🍿 **Olá, {user.first_name}! Seja muito bem-vindo ao Tela Cheia Filmes VIP!**\n\n"
         f"Garanta agora mesmo o seu **Acesso Vitalício ao Canal VIP** para assistir e baixar "
         f"todos os Lançamentos de Filmes e Séries em **4K ULTRA HD, Áudio Dual (Dublado/Legendado)** sem anúncios!\n\n"
-        f"💰 **Valor Promocional:** Apenas **R$ 5,00** (Pagamento Único)\n"
+        f"💰 **Valor Promocional:** Apenas **R$ 10,00** (Pagamento Único)\n"
         f"⚡ **Liberação:** Automática e Imediata via PIX\n\n"
         f"Clique no botão abaixo para gerar o seu **PIX Copia e Cola**:"
     )
 
     keyboard = [
-        [InlineKeyboardButton("⚡ Comprar Acesso VIP (R$ 5,00) via PIX", callback_data="generate_pix")],
+        [InlineKeyboardButton("⚡ Comprar Acesso VIP (R$ 10,00) via PIX", callback_data="generate_pix")],
         [InlineKeyboardButton("💬 Falar com Suporte Humano", url="https://t.me/leh_lurdes")]
     ]
 
@@ -80,7 +80,7 @@ async def generate_pix_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     # Gera o PIX na API SyncPay
     pix_res = create_pix_cashin(
-        amount=5.00,
+        amount=10.00,
         description="Acesso VIP Tela Cheia Filmes",
         client_name=client_name,
         client_email=client_email,
@@ -91,7 +91,7 @@ async def generate_pix_callback(update: Update, context: ContextTypes.DEFAULT_TY
         error_msg = pix_res.get("error", "Erro desconhecido")
         keyboard = [
             [InlineKeyboardButton("🔄 Tentar Novamente", callback_data="generate_pix")],
-            [InlineKeyboardButton("💬 Falar com Suporte", url="https://t.me/leh_lurdes")]
+            [InlineKeyboardButton("💬 Falar com Suporte Humano", url="https://t.me/leh_lurdes")]
         ]
         await query.edit_message_text(
             f"❌ **Não foi possível gerar a chave PIX no momento.**\n\n_{error_msg}_\n\n"
@@ -109,20 +109,20 @@ async def generate_pix_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     pix_instructions = (
         f"💎 **PIX GERADO COM SUCESSO!**\n\n"
-        f"📌 **Valor:** R$ 5,00\n"
+        f"📌 **Valor:** R$ 10,00\n"
         f"📌 **Produto:** Acesso VIP Vitalício Tela Cheia Filmes\n\n"
         f"👇 **Código PIX Copia e Cola:** (Toque no código abaixo para copiar)\n\n"
         f"`{pix_code}`\n\n"
         f"⚡ **Como Pagar:**\n"
         f"1️⃣ Abra o aplicativo do seu Banco ou NuBank\n"
         f"2️⃣ Escolha a opção **PIX Copia e Cola**\n"
-        f"3️⃣ Cole o código acima e confirme o pagamento de **R$ 5,00**\n\n"
+        f"3️⃣ Cole o código acima e confirme o pagamento de **R$ 10,00**\n\n"
         f"✨ *Assim que você concluir o pagamento, o seu link de acesso ao Canal VIP será liberado automaticamente aqui no chat!*"
     )
 
     keyboard = [
         [InlineKeyboardButton("✅ Já Paguei / Verificar Pagamento", callback_data="check_pix")],
-        [InlineKeyboardButton("💬 Suporte / Atendimento", url="https://t.me/leh_lurdes")],
+        [InlineKeyboardButton("💬 Suporte / Falar com Atendente", url="https://t.me/leh_lurdes")],
         [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_order")]
     ]
 
@@ -163,7 +163,7 @@ async def check_pix_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
     else:
         keyboard = [
             [InlineKeyboardButton("✅ Já Paguei / Verificar Novamente", callback_data="check_pix")],
-            [InlineKeyboardButton("💬 Falar com Suporte", url="https://t.me/leh_lurdes")]
+            [InlineKeyboardButton("💬 Falar com Suporte Humano", url="https://t.me/leh_lurdes")]
         ]
         await query.message.reply_text(
             f"⏳ **Pagamento ainda em processamento!**\n\n"
@@ -209,7 +209,8 @@ async def deliver_vip_access(app: Application, chat_id: int, user_id: int, user_
     )
 
     keyboard = [
-        [InlineKeyboardButton("🚀 ENTRAR NO CANAL VIP AGORA", url=invite_link)]
+        [InlineKeyboardButton("🚀 ENTRAR NO CANAL VIP AGORA", url=invite_link)],
+        [InlineKeyboardButton("💬 Suporte Humano", url="https://t.me/leh_lurdes")]
     ]
 
     await app.bot.send_message(
@@ -224,13 +225,14 @@ async def deliver_vip_access(app: Application, chat_id: int, user_id: int, user_
         admin_notify = (
             f"💰 **NOVA VENDA REALIZADA COM SUCESSO!**\n\n"
             f"👤 **Cliente:** {user_name} (ID: `{user_id}`)\n"
-            f"💵 **Valor:** R$ 5,00 (PIX SyncPay)\n"
+            f"💵 **Valor:** R$ 10,00 (PIX SyncPay)\n"
             f"🆔 **Transação:** `{identifier}`\n"
             f"🔗 **Convite Gerado:** {invite_link}"
         )
         await app.bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_notify, parse_mode="Markdown")
     except Exception as err:
         logging.warning(f"Não foi possível notificar admin {ADMIN_CHAT_ID}: {err}")
+
 
 
 async def auto_check_pix_loop(app: Application, chat_id: int, user_id: int, user_name: str, identifier: str):

@@ -70,12 +70,13 @@ Tabela `movies`:
   - Gerencia a autenticação via Bearer Token com cache automático de 1h, solicitação de depósitos PIX Cash-In (`create_pix_cashin`) com validação de CPF e telefone, e consulta de status de transações (`check_transaction_status`).
 - **`src/sales_bot.py`**:
   - Bot dedicado de Vendas Automáticas via PIX SyncPay (`@telacheiafilmes_bot`).
-  - Recebe comandos de compra, gera a chave PIX Copia e Cola instantaneamente, monitora a confirmação do pagamento no banco a cada 10 segundos e gera o link de convite exclusivo para o canal VIP (`TELEGRAM_VIP_CHANNEL_ID`), notificando o cliente e o administrador (`ADMIN_CHAT_ID`).
+  - Recebe comandos de compra no valor reajustado de **R$ 10,00**, gera a chave PIX Copia e Cola instantaneamente, exibe botões diretos de **Suporte Humano** (`https://t.me/leh_lurdes`), monitora a confirmação do pagamento no banco a cada 10 segundos e gera o link de convite exclusivo para o canal VIP (`TELEGRAM_VIP_CHANNEL_ID`), notificando o cliente e o administrador (`ADMIN_CHAT_ID`).
 - **`run_sales_bot.py`**:
   - Script principal na raiz para inicialização e execução contínua do Bot de Vendas `@telacheiafilmes_bot` em segundo plano.
 - **`src/telegram_bot.py`**:
   - Módulo assíncrono do Bot Admin do Telegram (`@TelaCheiaadmin_bot`) para automação de postagens.
-  - **Fluxo 1 (Canal Público `@dramasleh`)**: Busca filmes no TMDB por nome, filtra e organiza galeria de imagens priorizando 1º Pôster em Português (`pt-BR`), 2º Pôster em Inglês (`en-US`), 3º e 4º Imagens Variadas, com navegação de lotes via `🔄 Exibir Mais Imagens` e controle de seleção interativo (`all_images_data`). Gera Copy de Vendas persuasiva por IA com botão Inline `🔒 Solicitar Acesso (R$ 5,00)` redirecionando para o Bot de Vendas `@telacheiafilmes_bot` (`https://t.me/telacheiafilmes_bot?start=comprar_vip`), publicando no canal `@dramasleh` (`TELEGRAM_CHANNEL_ID`).
+  - **Fluxo 1 (Canal Público `@dramasleh`)**: Busca filmes no TMDB por nome, filtra e organiza galeria de imagens priorizando 1º Pôster em Português (`pt-BR`), 2º Pôster em Inglês (`en-US`), 3º e 4º Imagens Variadas, com navegação de lotes via `🔄 Exibir Mais Imagens` e controle de seleção interativo (`all_images_data`). Gera Copy de Vendas persuasiva por IA com o valor de **R$ 10,00** e botões Inline `🔒 Solicitar Acesso VIP (R$ 10,00)` e `💬 Falar com Suporte` (`@leh_lurdes`), redirecionando para o Bot de Vendas `@telacheiafilmes_bot` (`https://t.me/telacheiafilmes_bot?start=comprar_vip`), publicando no canal `@dramasleh` (`TELEGRAM_CHANNEL_ID`).
+
   - **Fluxo 2 (Canal VIP)**: Publicação ultra-rápida em menos de 1 segundo utilizando o cliente nativo **Telethon MTProto** (`send_file`) com a sessão do `DailymotionAgent` para o ID numérico do canal VIP privado (`-1003917174917`). Detecta e exibe a legenda original em tempo real via Telethon ao receber links (`https://t.me/c/3917174917/...`) e suporta edição interativa de legenda (`STATE_EDIT_VIP_TITLE`).
 - **`run_bot.py`**:
   - Script principal na raiz para inicialização e execução contínua do Bot Admin do Telegram em segundo plano.
