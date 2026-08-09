@@ -1849,7 +1849,6 @@ def create_telegram_bot_app() -> Application:
         per_message=False
     )
 
-    app.add_handler(conv_post_youtube)
     # ConversationHandler para Postar no YouTube (Privado)
     conv_post_youtube = ConversationHandler(
         entry_points=[
@@ -1859,9 +1858,10 @@ def create_telegram_bot_app() -> Application:
         ],
         states={
             STATE_YT_SELECT_MOVIE: [
-                CallbackQueryHandler(handle_youtube_select_movie_callback, pattern="^(yt_sel_m_id:|cancel_post)$"),
+                CallbackQueryHandler(handle_youtube_select_movie_callback, pattern="^(yt_sel_m_id:.*|cancel_post)$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, handle_youtube_select_movie_callback)
             ],
+
             STATE_YT_CONFIRM_UPLOAD: [
                 CallbackQueryHandler(handle_youtube_execute_upload_callback, pattern="^(exec_yt_upload|cancel_post)$")
             ]
