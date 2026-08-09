@@ -26,7 +26,8 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
-SALES_BOT_TOKEN = os.getenv("SALES_BOT_TOKEN", "8941379789:AAE67EXyZYRpGJFv7q6TGbwCrajvTibFQAk")
+SALES_BOT_TOKEN = os.getenv("SALES_BOT_TOKEN")
+
 
 raw_vip_id = os.getenv("TELEGRAM_VIP_CHANNEL_ID", "-1003917174917")
 try:
@@ -278,15 +279,32 @@ def create_sales_bot_app() -> Application:
 
 async def main():
     """Função principal assíncrona para rodar o bot de vendas."""
-    logging.info("🚀 Iniciando o Bot de Vendas SyncPay (@telacheiafilmes_bot)...")
+    logging.info("Iniciando o Bot de Vendas SyncPay (@telacheiafilmes_bot)...")
     app = create_sales_bot_app()
     await app.initialize()
+
+    # Configura a mensagem de saudação oficial exibida no centro da tela ANTES de apertar START
+    bot_description = (
+        "🍿 Bem-vindo ao Tela Cheia Filmes VIP!\n\n"
+        "Garanta o seu Acesso Vitalício em 4K Ultra HD com Áudio Dual (Dublado/Legendado) sem anúncios por apenas R$ 10,00 (Pagamento Único).\n\n"
+        "👉 Clique no botão INICIAR (START) abaixo para gerar seu PIX instantâneo e receber o convite do Canal VIP!"
+    )
+    bot_short_desc = "🍿 Tela Cheia Filmes VIP - Acesso Vitalício por R$ 10,00 via PIX Automático."
+
+    try:
+        await app.bot.set_my_description(bot_description)
+        await app.bot.set_my_short_description(bot_short_desc)
+        logging.info("✅ Mensagem de saudação exibida antes do START configurada com sucesso!")
+    except Exception as e:
+        logging.warning(f"Não foi possível definir descrição do bot: {e}")
+
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
-    logging.info("✅ Bot de Vendas @telacheiafilmes_bot rodando com sucesso em polling!")
+    logging.info("Bot de Vendas @telacheiafilmes_bot rodando com sucesso em polling!")
 
     while True:
         await asyncio.sleep(3600)
+
 
 
 if __name__ == "__main__":
