@@ -137,7 +137,7 @@ STATE_RECEIVE_VIDEO, STATE_CONFIRM_VIDEO_TITLE, STATE_EDIT_VIP_TITLE = range(6, 
 # Estados da Conversa para Produzir Filme no Pipeline
 STATE_PRODUCE_CONFIRM, STATE_PRODUCE_INPUT_TITLE, STATE_PRODUCE_SELECT_MOVIE = range(9, 12)
 
-# Estados da Conversa para Thumbnail e Guia de Postagem do YouTube
+# Estados da Conversa para Thumbnail, Guia de Postagem e Upload do YouTube
 (
     STATE_THUMB_START,
     STATE_THUMB_INPUT_MANUAL,
@@ -150,8 +150,11 @@ STATE_PRODUCE_CONFIRM, STATE_PRODUCE_INPUT_TITLE, STATE_PRODUCE_SELECT_MOVIE = r
     STATE_THUMB_INPUT_MOVIE,
     STATE_THUMB_SELECT_MOVIE,
     STATE_GUIDE_INPUT_MOVIE,
-    STATE_GUIDE_SELECT_MOVIE
-) = range(12, 24)
+    STATE_GUIDE_SELECT_MOVIE,
+    STATE_YT_SELECT_MOVIE,
+    STATE_YT_CONFIRM_UPLOAD
+) = range(12, 26)
+
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
