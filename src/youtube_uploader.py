@@ -33,15 +33,16 @@ def upload_video_to_youtube(
     :param privacy_status: Status de privacidade ("private", "unlisted" ou "public").
     :return: Dicionário contendo status do upload e URL do vídeo no YouTube.
     """
-    refresh_token = os.getenv("DRIVE_REFRESH_TOKEN")
-    client_id = os.getenv("DRIVE_CLIENT_ID")
-    client_secret = os.getenv("DRIVE_CLIENT_SECRET")
+    refresh_token = os.getenv("YOUTUBE_REFRESH_TOKEN") or os.getenv("DRIVE_REFRESH_TOKEN")
+    client_id = os.getenv("YOUTUBE_CLIENT_ID") or os.getenv("DRIVE_CLIENT_ID")
+    client_secret = os.getenv("YOUTUBE_CLIENT_SECRET") or os.getenv("DRIVE_CLIENT_SECRET")
 
     if not all([refresh_token, client_id, client_secret]):
         return {
             "success": False,
-            "error": "Credenciais Google OAuth (DRIVE_REFRESH_TOKEN, DRIVE_CLIENT_ID, DRIVE_CLIENT_SECRET) ausentes no .env"
+            "error": "Credenciais Google OAuth (YOUTUBE_REFRESH_TOKEN, YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET) ausentes no .env"
         }
+
 
     if not os.path.exists(video_path):
         return {
