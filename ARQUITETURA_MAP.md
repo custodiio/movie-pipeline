@@ -85,7 +85,11 @@ Tabela `movies`:
 - **`src/thumbnail_generator.py`**:
   - Módulo de busca de imagens HD 16:9 (backdrops e logos transparentes) no TMDB e composição visual de Thumbnails em 1280x720 com sobreposição proporcional e posicionamento em 9 quadrantes via Pillow (PIL).
 - **`src/post_guide_generator.py`**:
-  - Módulo de geração de guias de postagem do YouTube contendo Títulos de captura, Descrição padrão formatada com dados de créditos do TMDB e Disclaimer fixo, e lista de Tags em alta estritamente focadas no título.
+  - Módulo de geração de guias de postagem do YouTube via IA com 3 requisições isoladas (`Azure OpenAI` -> `Gemini` -> `DeepSeek` -> `OpenAI`):
+    1. **Título SEO de Captura**: Nome do filme em destaque + ganchos SEO em CAIXA ALTA focados em capturar buscas (`ASSISTIR [TITULO] COMPLETO HD`, `[TITULO] DUBLADO FULL HD GRÁTIS`).
+    2. **Descrição Completa com Liberdade Criativa**: 2 parágrafos persuasivos adaptando a sinopse ao filme, elenco principal e diretor do TMDB, chamadas para ação (Inscrição, Like, Compartilhar) + **Hashtags em Alta** geradas via IA em requisição isolada + **Disclaimer Fixo de Direitos Autorais**.
+    3. **Tags de Alta Busca**: Lista de palavras-chave altamente buscadas no YouTube separadas por vírgula em requisição isolada.
+
 - **`inject_secrets.py`**:
   - Script que injeta as secrets do GitHub Actions (`TELEGRAM_BOT_TOKEN`, `ADMIN_CHAT_ID`, `TELEGRAM_VIP_CHANNEL_ID`, `TMDB_API_KEY`, etc.) diretamente no código do notebook master antes do disparo para o Kaggle.
 
