@@ -2235,8 +2235,12 @@ async def handle_youtube_execute_upload_callback(update: Update, context: Contex
 
     data = query.data
     if data == "cancel_post":
-        await query.edit_message_text("❌ Publicação no YouTube cancelada.")
+        try:
+            await query.edit_message_caption("❌ Publicação no YouTube cancelada.")
+        except Exception:
+            await query.edit_message_text("❌ Publicação no YouTube cancelada.")
         return ConversationHandler.END
+
 
     movie_info = context.user_data.get("yt_movie_info", {})
     guide = context.user_data.get("yt_guide", {})
