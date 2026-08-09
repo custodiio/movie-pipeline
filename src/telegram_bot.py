@@ -534,6 +534,7 @@ async def handle_receive_video(update: Update, context: ContextTypes.DEFAULT_TYP
                 client = TelegramClient(sess_path, int(api_id), api_hash)
                 await client.connect()
                 if await client.is_user_authorized():
+                    await client.get_dialogs()
                     parts = link_str.split('/')
                     source_msg_id = int(parts[-1])
                     source_chat_raw = parts[-2]
@@ -541,6 +542,7 @@ async def handle_receive_video(update: Update, context: ContextTypes.DEFAULT_TYP
                     orig_msg = await client.get_messages(source_chat, ids=source_msg_id)
                     if orig_msg and (orig_msg.text or orig_msg.message):
                         caption = orig_msg.text or orig_msg.message
+
                 await client.disconnect()
             except Exception as e:
                 logging.warning(f"Não foi possível extrair legenda via Telethon no preview: {e}")
@@ -618,8 +620,10 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
             await client.connect()
             if await client.is_user_authorized():
                 chat_entity = await client.get_entity(TELEGRAM_VIP_CHANNEL_ID)
+                await client.get_dialogs()
                 
                 if video_link and ("t.me/c/" in video_link or "t.me/" in video_link):
+
                     parts = video_link.strip().split('/')
                     source_msg_id = int(parts[-1])
                     source_chat_raw = parts[-2]
