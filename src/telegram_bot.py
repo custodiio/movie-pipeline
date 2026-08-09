@@ -146,17 +146,19 @@ STATE_PRODUCE_CONFIRM, STATE_PRODUCE_INPUT_TITLE, STATE_PRODUCE_SELECT_MOVIE = r
     STATE_THUMB_SELECT_LOGO,
     STATE_THUMB_SELECT_SCALE,
     STATE_THUMB_SELECT_POSITION,
-    STATE_GUIDE_INPUT_TITLE
-) = range(12, 20)
-
-
-
+    STATE_GUIDE_INPUT_TITLE,
+    STATE_THUMB_INPUT_MOVIE,
+    STATE_THUMB_SELECT_MOVIE,
+    STATE_GUIDE_INPUT_MOVIE,
+    STATE_GUIDE_SELECT_MOVIE
+) = range(12, 24)
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Exibe o menu principal do Bot do Telegram."""
     reply_keyboard = [
         ["🎬 Produzir Filme (Pipeline)"],
+        ["🖼️ Criar Thumbnail (Capa 16:9)", "📝 Gerar Guia de Postagem (IA)"],
         ["📢 Criar Postagem de Venda", "🎥 Postar Vídeo no VIP"],
         ["ℹ️ Status dos Canais", "❓ Ajuda"]
     ]
@@ -171,11 +173,14 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "💡 **Como usar o Bot:**\n\n"
-        "1. **🎬 Produzir Filme (Pipeline)**: Pesquisa o filme em alta no TMDB que ainda não foi postado (ou permite digitar o nome manualmente), limpa os arquivos locais e do Drive, envia os metadados .txt e aciona a GPU Tesla T4 no Kaggle.\n\n"
-        "2. **📢 Criar Postagem de Venda**: Busca o filme no TMDB, seleciona pôsteres, gera a copy persuasiva via IA e envia ao canal público com o botão de acesso.\n\n"
-        "3. **🎥 Postar Vídeo no VIP**: Envia vídeos de qualquer tamanho (com split automático para > 2GB) para o canal VIP.",
+        "1. **🎬 Produzir Filme (Pipeline)** (`/produzir`): Pesquisa o filme em alta no TMDB que ainda não foi postado (ou permite digitar manualmente), limpa os arquivos e aciona a GPU Tesla T4 no Kaggle.\n\n"
+        "2. **🖼️ Criar Thumbnail** (`/thumb` ou `/capa`): Aciona APENAS a criação da capa 16:9 HD (Backdrops TMDB ou Imagem Manual + Logo Oficial + Grid 9 Posições) sem rodar o pipeline.\n\n"
+        "3. **📝 Gerar Guia de Postagem** (`/guia`): Aciona APENAS a geração do Guia do YouTube via IA (Título SEO, Descrição Adaptada, Hashtags, Disclaimer e Tags) sem rodar o pipeline.\n\n"
+        "4. **📢 Criar Postagem de Venda** (`/postar`): Busca o filme no TMDB, gera a copy persuasiva via IA e publica no canal público.\n\n"
+        "5. **🎥 Postar Vídeo no VIP** (`/postar_video`): Envia vídeos de qualquer tamanho (com corte automático para > 2GB) para o canal VIP.",
         parse_mode="Markdown"
     )
+
 
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1506,7 +1511,116 @@ async def handle_guide_title_input_or_callback(update: Update, context: ContextT
     return ConversationHandler.END
 
 
+# ==============================================================================
+# FLUXOS STANDALONE (ISOLADOS): THUMBNAIL E GUIA DE POSTAGEM
+# ==============================================================================
 
+async def initiate_thumb_standalone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Aciona apenas o gerador de Thumbnail (Capa 16:9 HD) sem rodar o pipeline."""
+    text = (
+        "🖼️ <b>GERADOR DE THUMBNAIL (CAPA 16:9 HD)</b>\n\n"
+        "✏️ <b>Digite o nome do filme para o qual deseja criar a capa:</b>"
+    )
+    if update.message:
+        await update.message.reply_text(text, parse_mode="HTML")
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(text, parse_mode="HTML")
+    return STATE_THUMB_INPUT_MOVIE
+
+
+async def handle_thumb_input_movie_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_query = update.message.text.strip()
+    msg = await update.message.reply_text(f"🔎 Buscando '{user_query}' no TMDB...")
+    try:
+        results = search_movies(user_query, language="pt-BR")
+    except Exception as e:
+        logging.error(f"Erro TMDB busca: {e}")
+        results = []
+
+    if not results:
+        await msg.reply_text("❌ Nenhum filme encontrado. Por favor, digite o nome do filme novamente:")
+        return STATE_THUMB_INPUT_MOVIE
+
+    keyboard = []
+    for item in results[:5]:
+        m_id = item.get("id")
+        m_title = item.get("title") or item.get("name")
+        m_year = (item.get("release_date") or "")[:4]
+        btn_text = f"🎬 {m_title} ({m_year})" if m_year else f"🎬 {m_title}"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"thumb_sel_m_id:{m_id}")])
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
+
+    await msg.edit_text("👇 <b>Selecione o filme para criar a capa:</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    return STATE_THUMB_SELECT_MOVIE
+
+
+async def handle_thumb_select_movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data.startswith("thumb_sel_m_id:"):
+        tmdb_id = int(data.split(":")[1])
+        await query.edit_message_text(f"⏳ Obtendo detalhes do filme (ID {tmdb_id})...")
+        movie_info = get_movie_by_tmdb_id(tmdb_id, language="pt-BR")
+        return await start_thumbnail_flow(query, context, movie_info)
+    elif data == "cancel_post":
+        await query.edit_message_text("❌ Operação cancelada.")
+        return ConversationHandler.END
+
+
+async def initiate_guide_standalone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Aciona apenas o gerador de Guia de Postagem (IA) sem rodar o pipeline."""
+    text = (
+        "📝 <b>GERADOR DE GUIA DE POSTAGEM DO YOUTUBE (IA)</b>\n\n"
+        "✏️ <b>Digite o nome do filme para o qual deseja gerar o guia:</b>"
+    )
+    if update.message:
+        await update.message.reply_text(text, parse_mode="HTML")
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(text, parse_mode="HTML")
+    return STATE_GUIDE_INPUT_MOVIE
+
+
+async def handle_guide_input_movie_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_query = update.message.text.strip()
+    msg = await update.message.reply_text(f"🔎 Buscando '{user_query}' no TMDB...")
+    try:
+        results = search_movies(user_query, language="pt-BR")
+    except Exception as e:
+        logging.error(f"Erro TMDB busca: {e}")
+        results = []
+
+    if not results:
+        await msg.reply_text("❌ Nenhum filme encontrado. Por favor, digite o nome do filme novamente:")
+        return STATE_GUIDE_INPUT_MOVIE
+
+    keyboard = []
+    for item in results[:5]:
+        m_id = item.get("id")
+        m_title = item.get("title") or item.get("name")
+        m_year = (item.get("release_date") or "")[:4]
+        btn_text = f"🎬 {m_title} ({m_year})" if m_year else f"🎬 {m_title}"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"guide_sel_m_id:{m_id}")])
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
+
+    await msg.edit_text("👇 <b>Selecione o filme para gerar o guia:</b>", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    return STATE_GUIDE_SELECT_MOVIE
+
+
+async def handle_guide_select_movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data.startswith("guide_sel_m_id:"):
+        tmdb_id = int(data.split(":")[1])
+        await query.edit_message_text(f"⏳ Obtendo detalhes do filme (ID {tmdb_id})...")
+        movie_info = get_movie_by_tmdb_id(tmdb_id, language="pt-BR")
+        return await start_post_guide_flow(query, context, movie_info)
+    elif data == "cancel_post":
+        await query.edit_message_text("❌ Operação cancelada.")
+        return ConversationHandler.END
 
 
 # ==============================================================================
@@ -1524,12 +1638,8 @@ def create_telegram_bot_app() -> Application:
     conv_produce_movie = ConversationHandler(
         entry_points=[
             MessageHandler(filters.Regex(r"^🎬 Produzir Filme \(Pipeline\)$"), initiate_produce_movie),
-            CommandHandler("produzir", initiate_produce_movie),
-            CommandHandler("thumb", initiate_produce_movie),
-            CommandHandler("capa", initiate_produce_movie),
-            CommandHandler("guia", initiate_produce_movie)
+            CommandHandler("produzir", initiate_produce_movie)
         ],
-
 
         states={
             STATE_PRODUCE_CONFIRM: [
@@ -1568,6 +1678,80 @@ def create_telegram_bot_app() -> Application:
             ]
         },
 
+        fallbacks=[
+            CommandHandler("cancel", lambda u, c: ConversationHandler.END),
+            CommandHandler("start", start_command)
+        ],
+        allow_reentry=True,
+        per_message=False
+    )
+
+    # ConversationHandler para Criar Apenas Thumbnail (Standalone)
+    conv_thumb_only = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex(r"^🖼️ Criar Thumbnail \(Capa 16:9\)$"), initiate_thumb_standalone),
+            CommandHandler("thumb", initiate_thumb_standalone),
+            CommandHandler("capa", initiate_thumb_standalone)
+        ],
+        states={
+            STATE_THUMB_INPUT_MOVIE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_thumb_input_movie_name)
+            ],
+            STATE_THUMB_SELECT_MOVIE: [
+                CallbackQueryHandler(handle_thumb_select_movie_callback, pattern="^(thumb_sel_m_id:|cancel_post)")
+            ],
+            STATE_THUMB_START: [
+                CallbackQueryHandler(handle_thumb_start_callback, pattern="^(thumb_bg_tmdb|thumb_bg_manual|skip_thumb_to_guide)$")
+            ],
+            STATE_THUMB_INPUT_MANUAL: [
+                MessageHandler(filters.PHOTO, handle_thumb_manual_bg_input)
+            ],
+            STATE_THUMB_SELECT_BG: [
+                CallbackQueryHandler(handle_thumb_select_bg_callback, pattern="^thumb_sel_bg:")
+            ],
+            STATE_THUMB_ASK_LOGO: [
+                CallbackQueryHandler(handle_thumb_ask_logo_callback, pattern="^(thumb_logo_yes|thumb_logo_no)$")
+            ],
+            STATE_THUMB_SELECT_LOGO: [
+                CallbackQueryHandler(handle_thumb_select_logo_callback, pattern="^(thumb_sel_logo:|thumb_logo_no)")
+            ],
+            STATE_THUMB_SELECT_SCALE: [
+                CallbackQueryHandler(handle_thumb_select_scale_callback, pattern="^thumb_scale:")
+            ],
+            STATE_THUMB_SELECT_POSITION: [
+                CallbackQueryHandler(handle_thumb_select_position_callback, pattern="^thumb_pos:")
+            ],
+            STATE_GUIDE_INPUT_TITLE: [
+                CallbackQueryHandler(handle_guide_title_input_or_callback, pattern="^(guide_use_suggested_title|cancel_post)$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_guide_title_input_or_callback)
+            ]
+        },
+        fallbacks=[
+            CommandHandler("cancel", lambda u, c: ConversationHandler.END),
+            CommandHandler("start", start_command)
+        ],
+        allow_reentry=True,
+        per_message=False
+    )
+
+    # ConversationHandler para Criar Apenas Guia (Standalone)
+    conv_guide_only = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex(r"^📝 Gerar Guia de Postagem \(IA\)$"), initiate_guide_standalone),
+            CommandHandler("guia", initiate_guide_standalone)
+        ],
+        states={
+            STATE_GUIDE_INPUT_MOVIE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_guide_input_movie_name)
+            ],
+            STATE_GUIDE_SELECT_MOVIE: [
+                CallbackQueryHandler(handle_guide_select_movie_callback, pattern="^(guide_sel_m_id:|cancel_post)")
+            ],
+            STATE_GUIDE_INPUT_TITLE: [
+                CallbackQueryHandler(handle_guide_title_input_or_callback, pattern="^(guide_use_suggested_title|cancel_post)$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_guide_title_input_or_callback)
+            ]
+        },
         fallbacks=[
             CommandHandler("cancel", lambda u, c: ConversationHandler.END),
             CommandHandler("start", start_command)
@@ -1638,10 +1822,13 @@ def create_telegram_bot_app() -> Application:
     app.add_handler(MessageHandler(filters.Regex("^❓ Ajuda$"), help_command))
 
     app.add_handler(conv_produce_movie)
+    app.add_handler(conv_thumb_only)
+    app.add_handler(conv_guide_only)
     app.add_handler(conv_create_post)
     app.add_handler(conv_post_video)
 
     return app
+
 
 
 
