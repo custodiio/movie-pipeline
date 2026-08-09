@@ -786,13 +786,18 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                                             part_duration = duration / num_parts
                                             split_parts = []
 
+                                            ext = os.path.splitext(downloaded_path)[1]
+                                            if not ext:
+                                                ext = ".mkv"
+
                                             for i in range(num_parts):
                                                 start_t = i * part_duration
-                                                out_p = downloaded_path.rsplit('.', 1)[0] + f"_parte_{i+1}_de_{num_parts}.mkv"
+                                                out_p = downloaded_path.rsplit('.', 1)[0] + f"_parte_{i+1}_de_{num_parts}{ext}"
                                                 cmd_split = [
                                                     "ffmpeg", "-y", "-ss", str(start_t), "-i", downloaded_path,
                                                     "-t", str(part_duration), "-c", "copy", out_p
                                                 ]
+
                                                 proc_sp = await asyncio.create_subprocess_exec(*cmd_split, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
                                                 await proc_sp.communicate()
                                                 if os.path.exists(out_p) and os.path.getsize(out_p) > 0:
