@@ -698,10 +698,18 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                                     temp_dir = os.path.join(os.path.dirname(__file__), "..", "temp_vip_downloads")
                                     os.makedirs(temp_dir, exist_ok=True)
                                     
-                                    tracker_down = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "⏬ Baixando Vídeo de Canal Protegido")
-                                    downloaded_path = await client.download_media(orig_msg, file=temp_dir, progress_callback=tracker_down.callback)
+                                    tracker_down = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "⚡ Baixando em 32 Pedaços Paralelos")
                                     
+                                    try:
+                                        from src.fast_telethon import download_file_parallel
+                                        target_file = os.path.join(temp_dir, f"vip_file_{orig_msg.id}.mkv")
+                                        downloaded_path = await download_file_parallel(client, orig_msg, target_file, progress_callback=tracker_down.callback, workers_count=32)
+                                    except Exception as fast_err:
+                                        logging.warning(f"Fallback para download_media padrao por erro no Fast Telethon: {fast_err}")
+                                        downloaded_path = await client.download_media(orig_msg, file=temp_dir, progress_callback=tracker_down.callback)
+
                                     if downloaded_path and os.path.exists(downloaded_path):
+
                                         tracker_reup = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "🚀 Enviando Vídeo para o Canal VIP")
                                         await client.send_file(chat_entity, downloaded_path, caption=caption if caption else orig_msg.text, progress_callback=tracker_reup.callback)
                                         published_via_telethon = True

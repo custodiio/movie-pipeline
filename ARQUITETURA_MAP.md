@@ -79,13 +79,15 @@ Tabela `movies`:
 - **`src/telegram_bot.py`**:
   - Módulo assíncrono do Bot Admin do Telegram (`@TelaCheiaadmin_bot`) para automação de postagens.
   - **Fluxo 1 (Canal Público `@dramasleh`)**: Busca filmes no TMDB por nome, inclui a pergunta interativa do formato de áudio (`STATE_SELECT_AUDIO`: `🔊 DUBLADO`, `💬 LEGENDADO` ou `🔊💬 DUBLADO / LEGENDADO`), filtra e organiza a galeria de imagens (Pôsteres PT, EN, Variadas), gera a Copy de Vendas com o layout padrão estrito e botão Inline `[🔒 Solicitar Acesso Vitalício R$10,00]` direcionado para o Bot de Vendas `@TelaCheiaFilmes_bot` (`https://t.me/TelaCheiaFilmes_bot?start=comprar_vip`) e o botão de Suporte (`@leh_lurdes`), enviando com preview e confirmação para o admin publicar no canal público.
-  - **Fluxo 2 (Canal VIP)**: Publicação ultra-rápida em menos de 1 segundo utilizando o cliente nativo **Telethon MTProto** (`send_file`) com a sessão do `DailymotionAgent` para o ID numérico do canal VIP privado (`-1003917174917`). Detecta e exibe a legenda original em tempo real via Telethon ao receber links (`https://t.me/c/3917174917/...`) e suporta edição interativa de legenda (`STATE_EDIT_VIP_TITLE`).
+- **`src/fast_telethon.py`**:
+  - Módulo de transferência de mídia em 32 partes concorrentes usando fila assíncrona (`asyncio.Queue`) e conexões MTProto paralelas (`_borrow_sender(dc_id)`). Acelera o download/upload de arquivos pesados (2GB+) de canais protegidos em até 20x.
 
 - **`run_bot.py`**:
   - Script principal na raiz para inicialização e execução contínua do Bot Admin do Telegram em segundo plano.
 
 - **`main.py`**:
   - Orquestrador principal da aplicação na VPS. Invoca as funções de cada etapa do pipeline em sequência.
+
 
 
 

@@ -4,7 +4,8 @@ __pycache__/
 *.pyc
 output/
 temp/
+temp_vip_downloads/
 intro.mp4
 *.mp4
-
-
+*.session
+*.session-journal
