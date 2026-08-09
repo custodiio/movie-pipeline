@@ -872,7 +872,11 @@ def create_telegram_bot_app() -> Application:
             STATE_EDIT_COPY: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_copy_receive)]
         },
 
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[
+            CommandHandler("cancel", lambda u, c: ConversationHandler.END),
+            CommandHandler("start", start_command)
+        ],
+        allow_reentry=True,
         per_message=False
     )
 
@@ -891,9 +895,14 @@ def create_telegram_bot_app() -> Application:
             ],
             STATE_EDIT_VIP_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_vip_title_receive)]
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[
+            CommandHandler("cancel", lambda u, c: ConversationHandler.END),
+            CommandHandler("start", start_command)
+        ],
+        allow_reentry=True,
         per_message=False
     )
+
 
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("ajuda", help_command))
