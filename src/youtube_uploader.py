@@ -83,7 +83,18 @@ def upload_video_to_youtube(
         file_size = os.path.getsize(video_path) if os.path.exists(video_path) else 0
 
         while response is None:
-            status, response = request.next_chunk()
+            status = None
+            max_retries = 10
+            for attempt in range(max_retries):
+                try:
+                    status, response = request.next_chunk()
+                    break
+                except Exception as chunk_err:
+                    logger.warning(f"⚠️ Oscilação de rede durante upload ({attempt + 1}/{max_retries}): {chunk_err}. Retentando em 3s...")
+                    if attempt == max_retries - 1:
+                        raise chunk_err
+                    time.sleep(3)
+
             if status:
                 pct = status.progress() * 100
                 logger.info(f"  --> Progresso Upload YouTube: {int(pct)}%")
@@ -95,6 +106,7 @@ def upload_video_to_youtube(
                             progress_callback(pct, getattr(status, 'resumable_progress', 0), getattr(status, 'total_size', file_size))
                         except Exception as p_err:
                             logger.warning(f"Aviso progress callback: {p_err}")
+
 
 
         video_id = response.get("id")
