@@ -35,7 +35,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.tmdb_client import search_movies, get_movie_details, get_trending_movies
 from src.script_generator import generate_sales_copy
 from src.movie_selector import get_movie_by_tmdb_id, limpar_arquivos_locais_temporarios
-from src.drive_uploader import get_drive_service, limpar_temporarios_drive, upload_pasta_projeto
+from src.drive_uploader import get_drive_service, limpar_temporarios_drive, upload_pasta_projeto, baixar_do_drive
 from src.kaggle_trigger import trigger_kaggle_notebook
 from src.database import is_movie_posted, update_movie_status
 from src.thumbnail_generator import get_movie_images_tmdb, compose_thumbnail

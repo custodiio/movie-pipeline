@@ -129,3 +129,27 @@ def limpar_temporarios_drive(drive_service, manter_assets: bool = True):
                 logging.info(f"Limpeza de temporário no Drive removida: {f['name']}")
     except Exception as e:
         logging.warning(f"Aviso durante limpeza do Drive: {e}")
+
+def baixar_do_drive(drive_service, caminho_drive: str, caminho_dest_local: str) -> str | None:
+    """Baixa um arquivo do Google Drive para o caminho local fornecido."""
+    if not drive_service: return None
+    try:
+        from googleapiclient.http import MediaIoBaseDownload
+        file_id = buscar_id(drive_service, caminho_drive)
+        if not file_id:
+            logging.warning(f"Arquivo não encontrado no Drive: {caminho_drive}")
+            return None
+
+        os.makedirs(os.path.dirname(os.path.abspath(caminho_dest_local)), exist_ok=True)
+        request = drive_service.files().get_media(fileId=file_id)
+        with open(caminho_dest_local, "wb") as fh:
+            downloader = MediaIoBaseDownload(fh, request)
+            done = False
+            while not done:
+                status, done = downloader.next_chunk()
+        logging.info(f"✅ Arquivo baixado do Drive com sucesso: {caminho_drive} -> {caminho_dest_local}")
+        return caminho_dest_local
+    except Exception as e:
+        logging.error(f"Erro ao baixar arquivo '{caminho_drive}' do Drive: {e}")
+        return None
+
