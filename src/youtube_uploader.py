@@ -65,7 +65,7 @@ def upload_video_to_youtube(
             scopes=["https://www.googleapis.com/auth/youtube.upload"]
         )
 
-        youtube = build("youtube", "v3", credentials=credentials)
+        youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
 
         body = {
             "snippet": {

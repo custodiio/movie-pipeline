@@ -35,7 +35,7 @@ def get_drive_service():
         )
         if creds.expired and creds.refresh_token:
             creds.refresh(Request())
-        return build("drive", "v3", credentials=creds)
+        return build("drive", "v3", credentials=creds, cache_discovery=False)
     except Exception as e:
         logging.warning(f"Falha ao autenticar no Google Drive (Modo local/fallback ativo): {e}")
         return None
