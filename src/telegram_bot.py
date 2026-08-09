@@ -2151,6 +2151,50 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
     context.user_data["yt_movie_info"] = movie_info
     context.user_data["yt_slug"] = slug
 
+
+    # Envia mensagem inicial avisando que esta preparando o projeto
+    target = query.message if query else update.message
+    status_msg = await target.reply_text(
+        f"🔍 <b>Localizando arquivos do filme '{title_pt}'...</b>",
+        parse_mode="HTML"
+    )
+
+    loop = asyncio.get_running_loop()
+    last_edit = 0
+
+    def drive_progress_cb(pct, current_bytes, total_bytes):
+        nonlocal last_edit
+        now = time.time()
+        if now - last_edit < 3 and pct < 100:
+            return
+        last_edit = now
+
+        curr_mb = current_bytes / (1024 * 1024)
+        tot_mb = total_bytes / (1024 * 1024) if total_bytes else 0
+        filled = int(pct / 10)
+        bar = "█" * filled + "░" * (10 - filled)
+
+        text = (
+            f"⏬ <b>BAIXANDO VÍDEO DO GOOGLE DRIVE...</b>\n\n"
+            f"🎬 <b>Filme:</b> {title_pt}\n"
+            f"📊 <b>Progresso:</b> <code>[{bar}] {pct:.1f}%</code>\n"
+            f"📦 <b>Baixado:</b> <code>{curr_mb:.1f} MB / {tot_mb:.1f} MB</code>"
+        )
+
+        async def _do_edit():
+            try:
+                await status_msg.edit_text(text, parse_mode="HTML")
+            except Exception as e:
+                logging.warning(f"Aviso edicao progresso drive: {e}")
+
+        try:
+            if loop and loop.is_running():
+                asyncio.run_coroutine_threadsafe(_do_edit(), loop)
+            else:
+                asyncio.create_task(_do_edit())
+        except Exception as err:
+            logging.error(f"Erro agendamento progresso drive: {err}")
+
     # Prepara o Guia de Postagem (Reutiliza o guia_postagem.json existente se houver)
     guide_path = f"temp/{slug}/guia_postagem.json"
     guide_data = None
@@ -2159,7 +2203,7 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
         os.makedirs(f"temp/{slug}", exist_ok=True)
         drive = get_drive_service()
         if drive:
-            d_guide = baixar_do_drive(drive, f"Movie-Pipeline/Projetos/{slug}/guia_postagem.json", guide_path)
+            d_guide = await asyncio.to_thread(baixar_do_drive, drive, f"Movie-Pipeline/Projetos/{slug}/guia_postagem.json", guide_path)
             if d_guide and os.path.exists(d_guide):
                 guide_path = d_guide
 
@@ -2177,7 +2221,7 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
 
     context.user_data["yt_guide"] = guide_data
 
-    # Localiza o vídeo MP4 local ou faz download do Drive
+    # Localiza o vídeo MP4 local ou faz download do Drive com barra de progresso
     video_path = f"output/{slug}.mp4"
     if not os.path.exists(video_path):
         video_path = f"temp/{slug}/{slug}.mp4"
@@ -2186,7 +2230,13 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
         os.makedirs(f"temp/{slug}", exist_ok=True)
         drive = get_drive_service()
         if drive:
-            drive_file = baixar_do_drive(drive, f"Movie-Pipeline/Projetos/{slug}/{slug}.mp4", f"temp/{slug}/{slug}.mp4")
+            drive_file = await asyncio.to_thread(
+                baixar_do_drive,
+                drive,
+                f"Movie-Pipeline/Projetos/{slug}/{slug}.mp4",
+                f"temp/{slug}/{slug}.mp4",
+                drive_progress_cb
+            )
             if drive_file and os.path.exists(drive_file):
                 video_path = drive_file
 
@@ -2197,12 +2247,17 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
     if not os.path.exists(thumb_path):
         drive = get_drive_service()
         if drive:
-            d_thumb = baixar_do_drive(drive, f"Movie-Pipeline/Projetos/{slug}/thumbnail.png", f"temp/{slug}/thumbnail.png")
+            d_thumb = await asyncio.to_thread(baixar_do_drive, drive, f"Movie-Pipeline/Projetos/{slug}/thumbnail.png", f"temp/{slug}/thumbnail.png")
             if d_thumb and os.path.exists(d_thumb):
                 thumb_path = d_thumb
 
     context.user_data["yt_thumb_path"] = thumb_path if os.path.exists(thumb_path) else None
 
+    # Remove mensagem temporaria de download/carregamento
+    try:
+        await status_msg.delete()
+    except Exception:
+        pass
 
     has_video = os.path.exists(video_path)
     preview_msg = (
@@ -2222,6 +2277,7 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
     ]
 
     target = query.message if query else update.message
+
     if context.user_data.get("yt_thumb_path"):
         with open(context.user_data["yt_thumb_path"], "rb") as pf:
             await target.reply_photo(photo=pf, caption=preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
