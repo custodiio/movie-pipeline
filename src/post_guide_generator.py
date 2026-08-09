@@ -39,10 +39,11 @@ def get_movie_credits_tmdb(movie_id: int) -> dict:
 
 def generate_youtube_post_guide(movie_info: dict, custom_title: str = None) -> dict:
     """
-    Gera o Guia Completo de Postagem do YouTube adaptado via IA:
-    - Título de Captura com gancho
-    - Descrição Formatada Padrão com Elenco, Diretor, CTAs e Disclaimer
-    - Tags Relevantes em Alta (separadas por vírgula)
+    Gera o Guia Completo de Postagem do YouTube via IA com 3 requisições distintas:
+    1. Título SEO de Captura + Descrição com Liberdade Criativa
+    2. Hashtags Relevantes em Alta
+    3. Tags de Alta Busca separadas por vírgula
+    + Disclaimer Fixo de Direitos Autorais
     """
     title = movie_info.get("title", "")
     orig_title = movie_info.get("original_title", title)
@@ -55,102 +56,115 @@ def generate_youtube_post_guide(movie_info: dict, custom_title: str = None) -> d
     cast_str = ", ".join(credits["cast"]) if credits["cast"] else "um elenco estelar"
     director_str = credits["director"] if credits["director"] else "grandes nomes do cinema"
 
-    # Tenta adaptação avançada via IA
-    ai_adapted_para = ""
-    if overview:
-        try:
-            prompt_ai = f"""Adapte os 2 parágrafos de apresentação para a análise do filme no YouTube:
+    # --- REQUISIÇÃO 1: Título SEO + Descrição Criativa via IA ---
+    prompt_req1 = f"""Gere o Título SEO de Captura e a Descrição para o YouTube do filme:
 Título: {title} ({orig_title})
 Lançamento: {year}
 Sinopse: {overview}
 Elenco: {cast_str}
 Direção: {director_str}
 
-Siga ESTREITAMENTE o formato dos 2 parágrafos:
-Parágrafo 1: "Neste vídeo, destrinchamos cada detalhe do mais novo e aguardado lançamento de {year}: {title} ({orig_title}). Prepare-se para análises profundas, teorias, a explicação do final e todas as informações sobre esse grande filme!"
-Parágrafo 2: "Acompanhe a história eletrizante estrelada por {cast_str}, sob a direção de {director_str}. Quando segredos misteriosos vêm à tona e a tensão atinge o seu limite, os personagens precisam encarar dilemas profundos e confrontar o inevitável em uma trama cheia de reviravoltas."
+ESTRUTURA E PADRÃO OBRIGATÓRIOS:
 
-Retorne os 2 parágrafos adaptados mantendo a riqueza de detalhes da sinopse."""
-            ai_adapted_para = generate_llm_text(prompt_ai, system_instruction="Você é um especialista em Copywriting Cinematográfico de Alta Conversão.")
-        except Exception as e:
-            logging.warning(f"Fallback local ativado para texto de descrição: {e}")
+1. TÍTULO DO YOUTUBE:
+Gere um título com o nome exato do filme [{title}] seguido de elementos SEO em CAIXA ALTA focados em capturar buscas de usuários que querem assistir (ex: ASSISTIR {title.upper()} COMPLETO HD, {title.upper()} DUBLADO FULL HD GRÁTIS, etc.). Você tem liberdade criativa para definir os ganchos SEO.
 
-    # 1. Título do YouTube
-    if custom_title and custom_title.strip():
-        final_yt_title = custom_title.strip()
-    else:
-        clean_name = re.sub(r'[^\w\s]', '', title).upper()
-        final_yt_title = f"{clean_name} COMPLETO DUBLADO | ASSISTA {clean_name} FULL HD GRÁTIS"
+2. DESCRIÇÃO:
+Siga esse padrão e estrutura abaixo com total liberdade criativa para adaptar o texto, tom e detalhes ao filme:
 
-    # 2. Hashtags Relevantes
-    def make_tag(text):
-        return "#" + "".join(re.findall(r'[a-zA-Z0-9]', text))
+Neste vídeo, destrinchamos cada detalhe do mais novo e aguardado lançamento de {year}: {title} ({orig_title}). Prepare-se para análises profundas, teorias, a explicação do final e todas as informações sobre esse grande lançamento!
 
-    hashtags = [
-        make_tag(title),
-        make_tag(orig_title),
-        "#" + year,
-        "#Filmes" + year,
-        "#Lancamentos",
-        "#Cinema",
-        "#ReviewDeFilmes",
-        "#FinalExplicado"
-    ]
-    for actor in credits["cast"][:2]:
-        if actor:
-            hashtags.append(make_tag(actor))
-    if credits["director"]:
-        hashtags.append(make_tag(credits["director"]))
-
-    hashtags_str = " ".join(hashtags)
-
-    # 3. Corpo dos Parágrafos (IA ou Template Padrão)
-    if ai_adapted_para and len(ai_adapted_para) > 50:
-        base_body = ai_adapted_para.strip()
-    else:
-        base_body = f"""Neste vídeo, destrinchamos cada detalhe do mais novo e aguardado lançamento de {year}: {title} ({orig_title}). Prepare-se para análises profundas, teorias, a explicação do final e todas as informações sobre esse grande filme!
-
-Acompanhe a história eletrizante estrelada por {cast_str}, sob a direção de {director_str}. Quando segredos misteriosos vêm à tona e a tensão atinge o seu limite, os personagens precisam encarar dilemas profundos e confrontar o inevitável em uma trama cheia de reviravoltas."""
-
-    description = f"""{base_body}
+Acompanhe a história eletrizante estrelada por {cast_str}, sob a direção de {director_str}. Quando segredos misteriosos vêm à tona e a tensão atinge o seu limite, os personagens precisam encarar dilemas profundos e confrontar o inevitável em uma trama cheia de reviravoltas.
 
 🔔 INSCREVA-SE no canal e ative o sininho para não perder nenhuma crítica, análise e novidade sobre o cinema e as séries de streaming!
 👍 Deixe seu LIKE se este conteúdo te ajudou a entender todos os detalhes do filme!
 📢 Compartilhe este vídeo com seus amigos que adoram um bom filme e já assistiram a esse lançamento!
 
-{hashtags_str}
+FORMATO DA RESPOSTA:
+TITULO: [Título Gerado]
+DESCRICAO: [Descrição Gerada]"""
 
-⚠️ Disclaimer:
+    res_req1 = ""
+    try:
+        res_req1 = generate_llm_text(prompt_req1, system_instruction="Você é um especialista em SEO de YouTube e Copywriting Cinematográfico.")
+    except Exception as e:
+        logging.warning(f"Erro na requisição 1 da IA: {e}")
+
+    # Processa Título e Descrição retornados da IA
+    final_yt_title = ""
+    base_desc = ""
+
+    if "TITULO:" in res_req1 and "DESCRICAO:" in res_req1:
+        parts = res_req1.split("DESCRICAO:")
+        title_part = parts[0].replace("TITULO:", "").strip()
+        final_yt_title = title_part
+        base_desc = parts[1].strip()
+    elif res_req1:
+        base_desc = res_req1.strip()
+
+    if custom_title and custom_title.strip():
+        final_yt_title = custom_title.strip()
+    elif not final_yt_title:
+        clean_name = re.sub(r'[^\w\s]', '', title).upper()
+        final_yt_title = f"{clean_name} COMPLETO DUBLADO | ASSISTA {clean_name} FULL HD GRÁTIS"
+
+    if not base_desc:
+        base_desc = f"""Neste vídeo, destrinchamos cada detalhe do mais novo e aguardado lançamento de {year}: {title} ({orig_title}). Prepare-se para análises profundas, teorias, a explicação do final e todas as informações sobre esse grande lançamento!
+
+Acompanhe a história eletrizante estrelada por {cast_str}, sob a direção de {director_str}. Quando segredos misteriosos vêm à tona e a tensão atinge o seu limite, os personagens precisam encarar dilemas profundos e confrontar o inevitável em uma trama cheia de reviravoltas.
+
+🔔 INSCREVA-SE no canal e ative o sininho para não perder nenhuma crítica, análise e novidade sobre o cinema e as séries de streaming!
+👍 Deixe seu LIKE se este conteúdo te ajudou a entender todos os detalhes do filme!
+📢 Compartilhe este vídeo com seus amigos que adoram um bom filme e já assistiram a esse lançamento!"""
+
+    # --- REQUISIÇÃO 2: Hashtags em Alta via IA ---
+    prompt_req2 = f"""Gere uma lista de 8 a 12 Hashtags em alta estritamente relacionadas ao filme '{title}' ({orig_title}), elenco '{cast_str}' e ano {year}.
+Retorne apenas as hashtags na mesma linha separadas por espaço (ex: #NomeDoFilme #Diretor #Filmes2026 #ReviewDeFilmes #FinalExplicado)."""
+    
+    hashtags_str = ""
+    try:
+        hashtags_str = generate_llm_text(prompt_req2, system_instruction="Retorne apenas a lista de hashtags válidas do YouTube iniciadas com #.").strip()
+    except Exception as e:
+        logging.warning(f"Erro na requisição 2 da IA: {e}")
+
+    if not hashtags_str or "#" not in hashtags_str:
+        def make_tag(text):
+            return "#" + "".join(re.findall(r'[a-zA-Z0-9]', text))
+        hashtags_list = [make_tag(title), make_tag(orig_title), f"#{year}", f"#Filmes{year}", "#Lancamentos", "#Cinema", "#ReviewDeFilmes", "#FinalExplicado"]
+        hashtags_str = " ".join(hashtags_list)
+
+    # Disclaimer Fixo
+    disclaimer_fixo = """⚠️ Disclaimer:
 All rights to images, soundtracks, and film excerpts belong to their respective owners. The use of copyrighted material is done in accordance with the principle of fair use, for the purpose of criticism, commentary, and analysis, as permitted by applicable law."""
 
+    # Montagem Final da Descrição (IA Descrição + IA Hashtags + Disclaimer Fixo)
+    full_description = f"""{base_desc}
 
-    # 4. Tags Relevantes em Alta (separadas por vírgula)
-    tags_list = [
-        title,
-        f"{title} {year}",
-        f"{title} filme completo",
-        f"{title} dublado",
-        f"{title} legendado",
-        f"{title} resumo",
-        f"{title} analise",
-        f"{title} explicacao do final",
-        f"{title} review",
-        f"assistir {title}",
-        f"{orig_title}",
-        f"filmes de {year}",
-        f"lancamentos {year}",
-        f"cinema {year}"
-    ]
-    for c in credits["cast"]:
-        if c:
-            tags_list.append(f"{title} {c}")
-            tags_list.append(c)
+{hashtags_str}
 
-    tags_str = ", ".join(tags_list)
+{disclaimer_fixo}"""
+
+    # --- REQUISIÇÃO 3: Tags de Alta Busca via IA (separadas por vírgulas) ---
+    prompt_req3 = f"""Gere uma lista de 15 a 20 Tags de alta busca estritamente relacionadas ao filme '{title}' ({orig_title}) para o YouTube.
+Retorne apenas as tags separadas por vírgulas (ex: {title}, {title} {year}, {title} filme completo, {title} dublado, {title} explicacao do final)."""
+
+    tags_str = ""
+    try:
+        tags_str = generate_llm_text(prompt_req3, system_instruction="Retorne apenas as palavras-chave separadas por vírgulas.").strip()
+    except Exception as e:
+        logging.warning(f"Erro na requisição 3 da IA: {e}")
+
+    if not tags_str or "," not in tags_str:
+        tags_list = [
+            title, f"{title} {year}", f"{title} filme completo", f"{title} dublado", f"{title} legendado",
+            f"{title} resumo", f"{title} analise", f"{title} explicacao do final", f"{title} review",
+            f"assistir {title}", orig_title, f"filmes de {year}", f"lancamentos {year}", f"cinema {year}"
+        ]
+        tags_str = ", ".join(tags_list)
 
     guide_data = {
         "youtube_title": final_yt_title,
-        "description": description,
+        "description": full_description,
         "tags": tags_str,
         "hashtags": hashtags_str,
         "tmdb_id": tmdb_id,
@@ -158,6 +172,7 @@ All rights to images, soundtracks, and film excerpts belong to their respective 
     }
 
     return guide_data
+
 
 def save_post_guide_to_file(guide_data: dict, output_dir: str = "temp") -> str:
     """Salva o guia de postagem formatado em JSON e TXT."""
