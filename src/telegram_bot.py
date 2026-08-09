@@ -2385,8 +2385,10 @@ async def handle_youtube_execute_upload_callback(update: Update, context: Contex
         )
         await status_msg.edit_text(msg_success, parse_mode="HTML")
     else:
-        err = res.get("error", "Erro desconhecido")
+        import html
+        err = html.escape(str(res.get("error", "Erro desconhecido")))
         await status_msg.edit_text(f"❌ <b>Falha no upload para o YouTube:</b>\n<code>{err}</code>", parse_mode="HTML")
+
 
     return ConversationHandler.END
 
