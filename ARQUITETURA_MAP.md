@@ -90,6 +90,11 @@ Tabela `movies`:
     2. **Descrição Completa com Liberdade Criativa**: 2 parágrafos persuasivos adaptando a sinopse ao filme, elenco principal e diretor do TMDB, chamadas para ação (Inscrição, Like, Compartilhar) + **Hashtags em Alta** geradas via IA em requisição isolada + **Disclaimer Fixo de Direitos Autorais**.
     3. **Tags de Alta Busca**: Lista de palavras-chave altamente buscadas no YouTube separadas por vírgula em requisição isolada.
 
+- **`src/youtube_uploader.py`**:
+  - Módulo de upload automático para o YouTube via API v3 (`google-api-python-client`).
+  - Realiza o upload do vídeo final MP4 em partes resumable de 10 MB, aplicando o Título de Captura SEO (max 100 caracteres), a Descrição Adaptada, as Tags de alta busca, a Thumbnail 16:9 e o status de privacidade **Privado** (`privacyStatus="private"`).
+
+
 - **`inject_secrets.py`**:
   - Script que injeta as secrets do GitHub Actions (`TELEGRAM_BOT_TOKEN`, `ADMIN_CHAT_ID`, `TELEGRAM_VIP_CHANNEL_ID`, `TMDB_API_KEY`, etc.) diretamente no código do notebook master antes do disparo para o Kaggle.
 

@@ -5,6 +5,8 @@ Se um secret vier vazio, ignora para permitir o fallback padrão seguro do noteb
 import json
 import os
 import sys
+sys.stdout.reconfigure(encoding='utf-8')
+
 
 notebook_name = os.environ.get("NOTEBOOK", "movie_pipeline_master")
 file_path = f"{notebook_name}.ipynb"
@@ -19,6 +21,10 @@ print(f"📄 Abrindo notebook para injeção de secrets: {file_path}")
 
 with open(file_path, "r", encoding="utf-8") as f:
     nb = json.load(f)
+
+# Tenta carregar .env local se existir
+from dotenv import load_dotenv
+load_dotenv()
 
 # Mapa de secrets a injetar
 secrets = {
@@ -35,7 +41,9 @@ secrets = {
     "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
     "TELEGRAM_VIP_CHANNEL_ID": os.environ.get("TELEGRAM_VIP_CHANNEL_ID", ""),
     "ADMIN_CHAT_ID": os.environ.get("ADMIN_CHAT_ID", ""),
+
 }
+
 
 
 replaced_count = 0
