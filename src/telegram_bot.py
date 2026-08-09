@@ -32,10 +32,15 @@ from telegram.ext import (
 # Adiciona a raiz do projeto ao sys.path para importar módulos do src
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.tmdb_client import search_movies, get_movie_details
+from src.tmdb_client import search_movies, get_movie_details, get_trending_movies
 from src.script_generator import generate_sales_copy
+from src.movie_selector import get_movie_by_tmdb_id, limpar_arquivos_locais_temporarios
+from src.drive_uploader import get_drive_service, limpar_temporarios_drive, upload_pasta_projeto
+from src.kaggle_trigger import trigger_kaggle_notebook
+from src.database import is_movie_posted, update_movie_status
 
 import urllib.parse
+import time
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -65,7 +70,6 @@ class TelethonProgressTracker:
 
     def callback(self, current: int, total: int):
         now = time.time()
-        # Atualiza a cada 2.5s para evitar Rate Limit do Telegram (429)
         if now - self.last_update_time < 2.5 and current < total:
             return
         self.last_update_time = now
@@ -128,18 +132,23 @@ STATE_SEARCH_MOVIE, STATE_SELECT_MOVIE, STATE_SELECT_AUDIO, STATE_SELECT_IMAGES,
 # Estados da Conversa para Postar Vídeo no Canal VIP
 STATE_RECEIVE_VIDEO, STATE_CONFIRM_VIDEO_TITLE, STATE_EDIT_VIP_TITLE = range(6, 9)
 
+# Estados da Conversa para Produzir Filme no Pipeline
+STATE_PRODUCE_CONFIRM, STATE_PRODUCE_INPUT_TITLE, STATE_PRODUCE_SELECT_MOVIE = range(9, 12)
+
+
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Exibe o menu principal do Bot do Telegram."""
     reply_keyboard = [
+        ["🎬 Produzir Filme (Pipeline)"],
         ["📢 Criar Postagem de Venda", "🎥 Postar Vídeo no VIP"],
         ["ℹ️ Status dos Canais", "❓ Ajuda"]
     ]
     markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
     await update.message.reply_text(
         "👋 **Bem-vindo ao Bot Gerenciador do Movie-Pipeline!**\n\n"
-        "Selecione uma das opções abaixo para gerenciar as postagens dos canais:",
+        "Selecione uma das opções abaixo para gerenciar a produção de vídeos ou postagens dos canais:",
         reply_markup=markup,
         parse_mode="Markdown"
     )
@@ -147,10 +156,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "💡 **Como usar o Bot:**\n\n"
-        "1. **📢 Criar Postagem de Venda**: Busca o filme no TMDB, seleciona até 2 pôsteres, gera a copy persuasiva via IA e envia ao canal público (`@dramasleh`) com o botão de acesso.\n\n"
-        "2. **🎥 Postar Vídeo no VIP**: Envie qualquer vídeo para o bot e publique diretamente no canal VIP em tela cheia.",
+        "1. **🎬 Produzir Filme (Pipeline)**: Pesquisa o filme em alta no TMDB que ainda não foi postado (ou permite digitar o nome manualmente), limpa os arquivos locais e do Drive, envia os metadados .txt e aciona a GPU Tesla T4 no Kaggle.\n\n"
+        "2. **📢 Criar Postagem de Venda**: Busca o filme no TMDB, seleciona pôsteres, gera a copy persuasiva via IA e envia ao canal público com o botão de acesso.\n\n"
+        "3. **🎥 Postar Vídeo no VIP**: Envia vídeos de qualquer tamanho (com split automático para > 2GB) para o canal VIP.",
         parse_mode="Markdown"
     )
+
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -892,6 +903,229 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
 
 
 # ==============================================================================
+# FLUXO DE PRODUÇÃO DE FILME (PIPELINE DE AUTOMATIZAÇÃO)
+# ==============================================================================
+
+async def initiate_produce_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Inicia o fluxo de produção de filme no pipeline (busca o mais hypado não postado ou permite busca manual)."""
+    msg = await update.message.reply_text("🔎 Buscando filmes em alta no TMDB que ainda não foram produzidos...")
+    
+    try:
+        trending = get_trending_movies(language="pt-BR")
+    except Exception as e:
+        logging.error(f"Erro ao buscar tendências do TMDB: {e}")
+        trending = []
+
+    unposted_candidate = None
+    for item in trending:
+        tmdb_id = item.get("id")
+        if tmdb_id and not is_movie_posted(tmdb_id):
+            unposted_candidate = item
+            break
+
+    if unposted_candidate:
+        context.user_data["produce_candidate"] = unposted_candidate
+        title = unposted_candidate.get("title") or unposted_candidate.get("name", "Sem Título")
+        rel_date = (unposted_candidate.get("release_date") or "")[:4]
+        overview = unposted_candidate.get("overview", "Sem sinopse disponível.")
+        tmdb_id = unposted_candidate.get("id")
+
+        text = (
+            f"🎬 <b>Filme em Alta Encontrado no TMDB:</b>\n\n"
+            f"📌 <b>Título:</b> {title} ({rel_date})\n"
+            f"⭐ <b>TMDB ID:</b> {tmdb_id}\n"
+            f"📝 <b>Sinopse:</b> {overview[:300]}...\n\n"
+            f"Deseja iniciar a produção deste filme no pipeline?"
+        )
+        keyboard = [
+            [InlineKeyboardButton("✅ Confirmar Produção", callback_data="prod_confirm_auto")],
+            [InlineKeyboardButton("✏️ Definir Título Manualmente", callback_data="prod_manual_title")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await msg.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        return STATE_PRODUCE_CONFIRM
+    else:
+        text = (
+            "⚠️ Não encontramos novos títulos em alta pendentes no TMDB.\n\n"
+            "Deseja pesquisar e definir um filme manualmente para produzir?"
+        )
+        keyboard = [
+            [InlineKeyboardButton("✏️ Definir Título Manualmente", callback_data="prod_manual_title")],
+            [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await msg.edit_text(text, reply_markup=reply_markup, parse_mode="HTML")
+        return STATE_PRODUCE_CONFIRM
+
+
+async def handle_produce_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "prod_confirm_auto":
+        candidate = context.user_data.get("produce_candidate")
+        if not candidate:
+            await query.edit_message_text("❌ Candidato inválido. Tente novamente clicando em Produzir Filme.")
+            return ConversationHandler.END
+
+        tmdb_id = candidate.get("id")
+        await query.edit_message_text(f"⏳ Processando metadados do filme (ID {tmdb_id})...")
+        movie_info = get_movie_by_tmdb_id(tmdb_id, language="pt-BR")
+        await run_pipeline_execution(query, context, movie_info)
+        return ConversationHandler.END
+
+    elif data == "prod_manual_title":
+        await query.edit_message_text(
+            "✏️ <b>Digite o nome do filme que você deseja produzir:</b>",
+            parse_mode="HTML"
+        )
+        return STATE_PRODUCE_INPUT_TITLE
+
+    elif data == "cancel_post":
+        await query.edit_message_text("❌ Produção cancelada.")
+        return ConversationHandler.END
+
+
+async def handle_produce_manual_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_query = update.message.text.strip()
+    msg = await update.message.reply_text(f"🔎 Buscando '{user_query}' no TMDB...")
+
+    try:
+        results = search_movies(user_query, language="pt-BR")
+    except Exception as e:
+        logging.error(f"Erro na busca TMDB: {e}")
+        results = []
+
+    if not results:
+        await msg.reply_text("❌ Nenhum filme encontrado com esse nome. Por favor, digite novamente o nome do filme:")
+        return STATE_PRODUCE_INPUT_TITLE
+
+    keyboard = []
+    for item in results[:5]:
+        m_id = item.get("id")
+        m_title = item.get("title") or item.get("name")
+        m_year = (item.get("release_date") or "")[:4]
+        btn_text = f"🎬 {m_title} ({m_year})" if m_year else f"🎬 {m_title}"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"prod_sel_id:{m_id}")])
+
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await msg.edit_text(
+        "👇 <b>Selecione o filme desejado da lista abaixo:</b>",
+        reply_markup=reply_markup,
+        parse_mode="HTML"
+    )
+    return STATE_PRODUCE_SELECT_MOVIE
+
+
+async def handle_produce_select_movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data.startswith("prod_sel_id:"):
+        tmdb_id = int(data.split(":")[1])
+        await query.edit_message_text(f"⏳ Processando metadados do filme (ID {tmdb_id})...")
+        movie_info = get_movie_by_tmdb_id(tmdb_id, language="pt-BR")
+        await run_pipeline_execution(query, context, movie_info)
+        return ConversationHandler.END
+
+    elif data == "cancel_post":
+        await query.edit_message_text("❌ Produção cancelada.")
+        return ConversationHandler.END
+
+
+async def run_pipeline_execution(target_query_or_msg, context: ContextTypes.DEFAULT_TYPE, movie_info: dict):
+    title = movie_info.get("title")
+    slug = movie_info.get("slug")
+    tmdb_id = movie_info.get("tmdb_id")
+
+    status_text = (
+        f"⚙️ <b>PREPARANDO EXECUÇÃO DO PIPELINE</b>\n\n"
+        f"🎬 <b>Filme:</b> {title}\n"
+        f"📂 <b>Slug:</b> {slug}\n\n"
+        f"1️⃣ 🧹 Limpando arquivos temporários locais...\n"
+    )
+    
+    if hasattr(target_query_or_msg, 'edit_message_text'):
+        try:
+            await target_query_or_msg.edit_message_text(status_text, parse_mode="HTML")
+        except Exception:
+            pass
+
+    # A: Limpeza dos arquivos locais (temp e output)
+    limpar_arquivos_locais_temporarios(["temp", "output"])
+
+    # B: Limpeza no Google Drive
+    status_text += f"2️⃣ ☁️ Limpando pasta de Projetos no Google Drive...\n"
+    if hasattr(target_query_or_msg, 'edit_message_text'):
+        try:
+            await target_query_or_msg.edit_message_text(status_text, parse_mode="HTML")
+        except Exception:
+            pass
+
+    drive_service = get_drive_service()
+    if drive_service:
+        limpar_temporarios_drive(drive_service)
+    else:
+        logging.warning("Drive service indisponível. Continuando...")
+
+    # C: Upload do TXT para o Google Drive
+    status_text += f"3️⃣ 📄 Subindo arquivo de metadados ({slug}.txt) para o Drive...\n"
+    if hasattr(target_query_or_msg, 'edit_message_text'):
+        try:
+            await target_query_or_msg.edit_message_text(status_text, parse_mode="HTML")
+        except Exception:
+            pass
+
+    if drive_service:
+        # Garante que o arquivo TXT existe localmente antes de subir
+        txt_file = movie_info.get("txt_path") or os.path.join("temp", f"{slug}.txt")
+        if not os.path.exists(txt_file):
+            from src.movie_selector import save_movie_info_txt
+            save_movie_info_txt(movie_info, output_dir="temp")
+        upload_pasta_projeto(drive_service, slug, "temp")
+
+    # D: Disparo do Pipeline no Kaggle via GitHub Actions
+    status_text += f"4️⃣ 🚀 Disparando notebook no Kaggle com GPU Tesla T4 via GitHub Actions...\n"
+    if hasattr(target_query_or_msg, 'edit_message_text'):
+        try:
+            await target_query_or_msg.edit_message_text(status_text, parse_mode="HTML")
+        except Exception:
+            pass
+
+    triggered = trigger_kaggle_notebook("movie_pipeline_master")
+
+    if triggered:
+        final_msg = (
+            f"🚀 <b>PRODUÇÃO DISPARADA COM SUCESSO!</b>\n\n"
+            f"🎬 <b>Filme:</b> {title}\n"
+            f"⭐ <b>TMDB ID:</b> {tmdb_id}\n"
+            f"📂 <b>Slug:</b> <code>{slug}</code>\n\n"
+            f"🧹 <b>Limpeza:</b> Arquivos temporários locais e no Drive foram removidos!\n"
+            f"☁️ <b>Google Drive:</b> Metadados (<code>{slug}.txt</code>) salvos no Drive!\n"
+            f"⚡ <b>Kaggle GPU:</b> Servidor Tesla T4 acionado via GitHub Actions Dispatch!\n\n"
+            f"📌 Status no banco: <code>selected</code>. Ao concluir a renderização no Drive, o pipeline atualizará o status para <code>concluido</code>."
+        )
+    else:
+        final_msg = (
+            f"⚠️ <b>AVISO DE EXECUÇÃO:</b>\n\n"
+            f"Os metadados do filme '{title}' foram salvos no Drive, porém o disparo automático para o GitHub/Kaggle falhou (verifique a chave GITHUB_TOKEN no .env)."
+        )
+
+    if hasattr(target_query_or_msg, 'edit_message_text'):
+        try:
+            await target_query_or_msg.edit_message_text(final_msg, parse_mode="HTML")
+        except Exception:
+            pass
+
+
+
+
+# ==============================================================================
 # INICIALIZAÇÃO DO BOT
 # ==============================================================================
 
@@ -901,6 +1135,32 @@ def create_telegram_bot_app() -> Application:
         raise ValueError("TELEGRAM_BOT_TOKEN não está configurado no .env!")
 
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # ConversationHandler para Produzir Filme no Pipeline
+    conv_produce_movie = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex(r"^🎬 Produzir Filme \(Pipeline\)$"), initiate_produce_movie),
+            CommandHandler("produzir", initiate_produce_movie)
+        ],
+
+        states={
+            STATE_PRODUCE_CONFIRM: [
+                CallbackQueryHandler(handle_produce_confirm_callback, pattern="^(prod_confirm_auto|prod_manual_title|cancel_post)$")
+            ],
+            STATE_PRODUCE_INPUT_TITLE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_produce_manual_input)
+            ],
+            STATE_PRODUCE_SELECT_MOVIE: [
+                CallbackQueryHandler(handle_produce_select_movie_callback, pattern="^(prod_sel_id:|cancel_post)")
+            ]
+        },
+        fallbacks=[
+            CommandHandler("cancel", lambda u, c: ConversationHandler.END),
+            CommandHandler("start", start_command)
+        ],
+        allow_reentry=True,
+        per_message=False
+    )
 
     # ConversationHandler para Criar Postagem no Canal Público
     conv_create_post = ConversationHandler(
@@ -963,10 +1223,12 @@ def create_telegram_bot_app() -> Application:
     app.add_handler(MessageHandler(filters.Regex("^ℹ️ Status dos Canais$"), status_command))
     app.add_handler(MessageHandler(filters.Regex("^❓ Ajuda$"), help_command))
 
+    app.add_handler(conv_produce_movie)
     app.add_handler(conv_create_post)
     app.add_handler(conv_post_video)
 
     return app
+
 
 
 if __name__ == "__main__":

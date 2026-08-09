@@ -20,6 +20,8 @@ from src.video_editor import render_movie_video
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+from src.database import update_movie_status
+
 def main():
     print("\n🚀 ========================================================")
     print("   INICIANDO MOVIE-PIPELINE DE AUTOMATION DE VÍDEO")
@@ -68,9 +70,15 @@ def main():
         output_dir="output"
     )
 
+    # 7. Atualização do Status para 'concluido' no Banco SQLite
+    if filme and filme.get("tmdb_id"):
+        update_movie_status(filme["tmdb_id"], "concluido")
+        logging.info(f"✅ Status do filme '{filme['title']}' atualizado para 'concluido' no banco SQLite!")
+
     print("\n🎉 ========================================================")
     print(f"   VÍDEO FINAL RENDERIZADO COM SUCESSO: {video_final}")
     print("========================================================\n")
+
 
 if __name__ == "__main__":
     main()

@@ -125,3 +125,66 @@ def get_next_unposted_movie(language: str = "pt-BR", output_dir: str = "temp") -
     logging.warning("Todos os filmes da lista de tendências do TMDB já foram postados.")
     return None
 
+def get_movie_by_tmdb_id(tmdb_id: int, language: str = "pt-BR", output_dir: str = "temp") -> dict:
+    """
+    Busca os detalhes completos de um filme no TMDB pelo seu ID,
+    registra/atualiza no banco SQLite com status 'selected' e salva o arquivo TXT de metadados.
+    """
+    init_db()
+    detalhes = get_movie_details(tmdb_id, language=language)
+    
+    title = detalhes.get("title") or detalhes.get("name", "Filme Desconhecido")
+    original_title = detalhes.get("original_title") or detalhes.get("original_name", title)
+    overview = detalhes.get("overview", "")
+    release_date = detalhes.get("release_date", "")
+    runtime = detalhes.get("runtime")
+    
+    add_movie(
+        tmdb_id=tmdb_id,
+        title=title,
+        original_title=original_title,
+        overview=overview,
+        release_date=release_date,
+        runtime=runtime,
+        status="selected"
+    )
+    
+    slug = generate_movie_slug(title, release_date)
+    
+    selected_movie = {
+        "tmdb_id": tmdb_id,
+        "title": title,
+        "original_title": original_title,
+        "slug": slug,
+        "overview": overview,
+        "release_date": release_date,
+        "runtime": runtime,
+        "poster_path": detalhes.get("poster_path"),
+        "backdrop_path": detalhes.get("backdrop_path"),
+        "genres": [g.get("name") for g in detalhes.get("genres", [])]
+    }
+    
+    txt_path = save_movie_info_txt(selected_movie, output_dir=output_dir)
+    selected_movie["txt_path"] = txt_path
+    
+    logging.info(f"Filme '{title}' (ID {tmdb_id}) selecionado manualmente. Slug: {slug}")
+    return selected_movie
+
+def limpar_arquivos_locais_temporarios(dirs: list[str] = ["temp", "output"]):
+    """Limpa arquivos temporários locais mantendo a estrutura das pastas intacta."""
+    for d in dirs:
+        if os.path.exists(d):
+            for item in os.listdir(d):
+                file_path = os.path.join(d, item)
+                try:
+                    if os.path.isfile(file_path) or os.path.islink(file_path):
+                        os.unlink(file_path)
+                    elif os.path.isdir(file_path):
+                        import shutil
+                        shutil.rmtree(file_path)
+                except Exception as e:
+                    logging.warning(f"Erro ao remover arquivo temporário local '{file_path}': {e}")
+            logging.info(f"Pasta temporária local '{d}' limpa com sucesso.")
+
+
+

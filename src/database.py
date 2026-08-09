@@ -67,3 +67,15 @@ def mark_as_posted(tmdb_id: int):
             WHERE tmdb_id = ?
         """, (tmdb_id,))
         conn.commit()
+
+def update_movie_status(tmdb_id: int, status: str):
+    """Atualiza o status de um filme no banco de dados SQLite."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE movies 
+            SET status = ? 
+            WHERE tmdb_id = ?
+        """, (status, tmdb_id))
+        conn.commit()
+
