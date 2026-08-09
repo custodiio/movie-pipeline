@@ -635,13 +635,36 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                     try:
                         orig_msg = await client.get_messages(source_chat, ids=source_msg_id)
                         if orig_msg and orig_msg.media:
-                            # Copia o arquivo de vídeo/mídia real com a legenda escolhida!
-                            await client.send_file(chat_entity, orig_msg.media, caption=caption if caption else orig_msg.text)
-                            published_via_telethon = True
+                            try:
+                                # 1. Tenta envio direto via servidor
+                                await client.send_file(chat_entity, orig_msg.media, caption=caption if caption else orig_msg.text)
+                                published_via_telethon = True
+                            except Exception as send_err:
+                                # 2. Se o canal tiver Proteção de Conteúdo (Content Protection/noforwards) ativada pelo dono:
+                                # Baixa o arquivo de mídia temporariamente e envia o arquivo do vídeo para o canal VIP!
+                                err_msg_str = str(send_err).lower()
+                                if "protected" in err_msg_str or "noforwards" in err_msg_str or "restricted" in err_msg_str or "forward" in err_msg_str:
+                                    logging.info("Canal protegido contra cópia detectado. Baixando mídia temporariamente para re-upload no VIP...")
+                                    temp_dir = os.path.join(os.path.dirname(__file__), "..", "temp_vip_downloads")
+                                    os.makedirs(temp_dir, exist_ok=True)
+                                    
+                                    downloaded_path = await client.download_media(orig_msg, file=temp_dir)
+                                    if downloaded_path and os.path.exists(downloaded_path):
+                                        await client.send_file(chat_entity, downloaded_path, caption=caption if caption else orig_msg.text)
+                                        published_via_telethon = True
+                                        try:
+                                            os.remove(downloaded_path)
+                                        except Exception:
+                                            pass
+                                    else:
+                                        error_reason = "Não foi possível baixar a mídia do canal protegido."
+                                else:
+                                    error_reason = f"Erro ao enviar mídia: {send_err}"
                         else:
                             error_reason = "A mensagem no link de origem não contém um arquivo de mídia/vídeo ou a conta do Telethon não possui acesso ao canal de origem."
                     except Exception as msg_err:
                         error_reason = f"Erro ao acessar a mensagem no canal de origem: {msg_err}"
+
 
                 elif video_file_id or (msg_obj and (msg_obj.video or msg_obj.document)):
                     if video_file_id:
