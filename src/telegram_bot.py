@@ -1183,14 +1183,35 @@ async def handle_thumb_start_callback(update: Update, context: ContextTypes.DEFA
         backdrops = imgs.get("backdrops", [])
 
         if backdrops:
-            context.user_data["thumb_backdrops"] = backdrops[:6]
+            valid_backdrops = backdrops[:6]
+            context.user_data["thumb_backdrops"] = valid_backdrops
+
+            chat_id = query.message.chat_id
+            
+            # Envia as fotos dos backdrops em album para visualizacao direta no chat
+            media_group = [
+                InputMediaPhoto(media=url, caption=f"🖼️ <b>Opção de Fundo {i+1}</b>", parse_mode="HTML")
+                for i, url in enumerate(valid_backdrops)
+            ]
+            try:
+                await context.bot.send_media_group(chat_id=chat_id, media=media_group)
+            except Exception as e:
+                logging.warning(f"Não foi possível enviar album de backdrops: {e}")
+
             keyboard = []
-            for idx, b_url in enumerate(backdrops[:6], 1):
-                keyboard.append([InlineKeyboardButton(f"🖼️ Imagem de Fundo {idx}", callback_data=f"thumb_sel_bg:{idx-1}")])
+            row = []
+            for idx in range(len(valid_backdrops)):
+                row.append(InlineKeyboardButton(f"🖼️ Fundo {idx+1}", callback_data=f"thumb_sel_bg:{idx}"))
+                if len(row) == 3:
+                    keyboard.append(row)
+                    row = []
+            if row:
+                keyboard.append(row)
             keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
 
-            await query.edit_message_text(
-                "👇 <b>Selecione a imagem de fundo 16:9 desejada para a capa:</b>",
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="👇 <b>Confira as imagens enviadas acima e escolha a opção desejada para a capa:</b>",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
             )
@@ -1283,14 +1304,28 @@ async def handle_thumb_ask_logo_callback(update: Update, context: ContextTypes.D
         logos = imgs.get("logos", [])
 
         if logos:
-            context.user_data["thumb_logos"] = logos[:5]
+            valid_logos = logos[:5]
+            context.user_data["thumb_logos"] = valid_logos
+            chat_id = query.message.chat_id
+
+            # Envia as fotos das logos no chat para visualizacao do usuario
+            media_group = [
+                InputMediaPhoto(media=url, caption=f"🎨 <b>Logo Opção {i+1}</b>", parse_mode="HTML")
+                for i, url in enumerate(valid_logos)
+            ]
+            try:
+                await context.bot.send_media_group(chat_id=chat_id, media=media_group)
+            except Exception as e:
+                logging.warning(f"Não foi possível enviar album de logos: {e}")
+
             keyboard = []
-            for idx in range(len(logos[:5])):
+            for idx in range(len(valid_logos)):
                 keyboard.append([InlineKeyboardButton(f"🎨 Logo Opção {idx+1}", callback_data=f"thumb_sel_logo:{idx}")])
             keyboard.append([InlineKeyboardButton("❌ Sem Logo", callback_data="thumb_logo_no")])
 
-            await query.edit_message_text(
-                "👇 <b>Selecione a logo desejada da lista abaixo:</b>",
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text="👇 <b>Confira as logos enviadas acima e selecione a opção desejada:</b>",
                 reply_markup=InlineKeyboardMarkup(keyboard),
                 parse_mode="HTML"
             )
@@ -1299,6 +1334,7 @@ async def handle_thumb_ask_logo_callback(update: Update, context: ContextTypes.D
             await query.edit_message_text("⚠️ Nenhuma logo transparente encontrada no TMDB. A capa será gerada sem logo.")
             context.user_data["thumb_selected_logo"] = None
             return await render_and_finish_thumbnail(query, context)
+
 
 
 async def handle_thumb_select_logo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
