@@ -1,2 +1,11 @@
 requests
 python-dotenv
+python-telegram-bot[job-queue]>=21.0
+Pillow>=10.0.0
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+openai
+telethon
+cryptg
+
