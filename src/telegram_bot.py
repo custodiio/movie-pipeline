@@ -5,9 +5,11 @@ movie-pipeline - Automação de divulgação e postagens em canais público e VI
 
 import os
 import sys
+import json
 import logging
 import asyncio
 import requests
+
 from dotenv import load_dotenv
 
 from telegram import (
@@ -2256,7 +2258,7 @@ async def handle_youtube_execute_upload_callback(update: Update, context: Contex
         parse_mode="HTML"
     )
 
-    loop = context.application.loop
+    loop = asyncio.get_running_loop()
     last_edit = 0
 
     def yt_progress_cb(pct, current_bytes, total_bytes):
