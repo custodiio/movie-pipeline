@@ -2120,9 +2120,32 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
     context.user_data["yt_movie_info"] = movie_info
     context.user_data["yt_slug"] = slug
 
-    # Prepara o Guia de Postagem
-    guide_data = generate_youtube_post_guide(movie_info)
+    # Prepara o Guia de Postagem (Reutiliza o guia_postagem.json existente se houver)
+    guide_path = f"temp/{slug}/guia_postagem.json"
+    guide_data = None
+
+    if not os.path.exists(guide_path):
+        os.makedirs(f"temp/{slug}", exist_ok=True)
+        drive = get_drive_service()
+        if drive:
+            d_guide = baixar_do_drive(drive, f"Movie-Pipeline/Projetos/{slug}/guia_postagem.json", guide_path)
+            if d_guide and os.path.exists(d_guide):
+                guide_path = d_guide
+
+    if os.path.exists(guide_path):
+        try:
+            with open(guide_path, "r", encoding="utf-8") as gf:
+                guide_data = json.load(gf)
+            logging.info(f"✅ Guia de Postagem reutilizado do arquivo existente: {guide_path}")
+        except Exception as ge:
+            logging.warning(f"Aviso ao ler {guide_path}: {ge}")
+
+    if not guide_data:
+        logging.info("ℹ️ Guia existente não encontrado. Gerando novo Guia via IA...")
+        guide_data = generate_youtube_post_guide(movie_info)
+
     context.user_data["yt_guide"] = guide_data
+
 
     # Localiza o vídeo MP4 local ou faz download do Drive
     video_path = f"output/{slug}.mp4"
