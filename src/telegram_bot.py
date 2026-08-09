@@ -399,9 +399,10 @@ async def handle_confirm_images(update: Update, context: ContextTypes.DEFAULT_TY
         # Envia a mensagem com os botões em seguida
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text="👇 **Clique abaixo para solicitar o acesso VIP:**",
+            text="ㅤ",
             reply_markup=markup
         )
+
 
     # Botões de confirmação para o Admin
     action_btns = [
@@ -481,9 +482,10 @@ async def handle_publish_post(update: Update, context: ContextTypes.DEFAULT_TYPE
             await context.bot.send_media_group(chat_id=TELEGRAM_CHANNEL_ID, media=media)
             await context.bot.send_message(
                 chat_id=TELEGRAM_CHANNEL_ID,
-                text="👇 **Clique abaixo para solicitar o acesso VIP:**",
+                text="ㅤ",
                 reply_markup=markup
             )
+
 
         await query.edit_message_text(f"🎉 **PUBLICADO COM SUCESSO NO CANAL `{TELEGRAM_CHANNEL_ID}`!**", parse_mode="Markdown")
     except Exception as e:
@@ -606,8 +608,9 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
     sess_path = os.getenv("TELEGRAM_SESSION_PATH", "d:/Applications/DailymotionAgent/dailymotion_agent.session")
 
     published_via_telethon = False
+    error_reason = None
 
-    # 1. Tenta publicação instantânea via Telethon (MTProto Client)
+    # 1. Tenta publicação instantânea de MÍDIA via Telethon (MTProto Client)
     if api_id and api_hash and os.path.exists(sess_path):
         try:
             from telethon import TelegramClient
@@ -625,25 +628,33 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                     else:
                         source_chat = source_chat_raw
                     
-                    orig_msg = await client.get_messages(source_chat, ids=source_msg_id)
-                    if orig_msg:
-                        if orig_msg.media:
+                    try:
+                        orig_msg = await client.get_messages(source_chat, ids=source_msg_id)
+                        if orig_msg and orig_msg.media:
+                            # Copia o arquivo de vídeo/mídia real com a legenda escolhida!
                             await client.send_file(chat_entity, orig_msg.media, caption=caption if caption else orig_msg.text)
+                            published_via_telethon = True
                         else:
-                            await client.send_message(chat_entity, caption if caption else orig_msg.text)
-                        published_via_telethon = True
-                elif msg_obj and msg_obj.message_id:
-                    # Encaminha a mensagem original instantaneamente!
-                    await client.forward_messages(chat_entity, msg_obj.message_id, msg_obj.chat_id)
-                    published_via_telethon = True
+                            error_reason = "A mensagem no link de origem não contém um arquivo de mídia/vídeo ou a conta do Telethon não possui acesso ao canal de origem."
+                    except Exception as msg_err:
+                        error_reason = f"Erro ao acessar a mensagem no canal de origem: {msg_err}"
 
+                elif video_file_id or (msg_obj and (msg_obj.video or msg_obj.document)):
+                    if video_file_id:
+                        await context.bot.send_video(
+                            chat_id=TELEGRAM_VIP_CHANNEL_ID,
+                            video=video_file_id,
+                            caption=caption,
+                            supports_streaming=True
+                        )
+                        published_via_telethon = True
 
                 await client.disconnect()
         except Exception as e:
             logging.warning(f"Fallback para Bot API por exceção no Telethon: {e}")
 
-    # 2. Fallback via Bot API se o Telethon não enviou
-    if not published_via_telethon:
+    # 2. Fallback via Bot API se o vídeo não foi enviado via Telethon
+    if not published_via_telethon and not error_reason:
         try:
             if video_file_id:
                 await context.bot.send_video(
@@ -653,7 +664,7 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                     supports_streaming=True
                 )
                 published_via_telethon = True
-            elif msg_obj:
+            elif msg_obj and (msg_obj.video or msg_obj.document):
                 await context.bot.forward_message(
                     chat_id=TELEGRAM_VIP_CHANNEL_ID,
                     from_chat_id=msg_obj.chat_id,
@@ -662,11 +673,23 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                 published_via_telethon = True
         except Exception as e:
             logging.error(f"Erro ao publicar no VIP via Bot API: {e}")
-            await query.edit_message_text(f"❌ **Erro ao publicar no canal VIP `{TELEGRAM_VIP_CHANNEL_ID}`:**\n`{e}`\n\nVerifique se o bot ou a conta é ADMINISTRADORA do canal!", parse_mode="Markdown")
-            return ConversationHandler.END
 
-    await query.edit_message_text(f"🚀 **VÍDEO PUBLICADO COM SUCESSO NO CANAL VIP `{TELEGRAM_VIP_CHANNEL_ID}` em menos de 1 segundo!**", parse_mode="Markdown")
+    if published_via_telethon:
+        await query.edit_message_text(
+            f"🚀 **VÍDEO PUBLICADO COM SUCESSO NO CANAL VIP `{TELEGRAM_VIP_CHANNEL_ID}`!**",
+            parse_mode="Markdown"
+        )
+    else:
+        msg_err = error_reason if error_reason else "O link/mensagem enviada não contém um arquivo de vídeo válido."
+        await query.edit_message_text(
+            f"❌ **Não foi possível publicar o vídeo no Canal VIP:**\n\n"
+            f"⚠️ _{msg_err}_\n\n"
+            f"💡 **Dica:** Encaminhe o arquivo do vídeo **diretamente** para este bot admin, ou certifique-se de que a conta do bot faz parte do canal privado de origem!",
+            parse_mode="Markdown"
+        )
+
     return ConversationHandler.END
+
 
 
 
