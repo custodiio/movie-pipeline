@@ -35,7 +35,7 @@ try:
 except ValueError:
     TELEGRAM_VIP_CHANNEL_ID = raw_vip_id
 
-ADMIN_CHAT_ID = int(os.getenv("TELEGRAM_ADMIN_ID", "0"))
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID") or os.getenv("TELEGRAM_ADMIN_ID", "0"))
 
 STATE_IDLE = 0
 STATE_WAITING_PAYMENT = 1
