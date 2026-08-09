@@ -79,8 +79,9 @@ Tabela `movies`:
 - **`src/telegram_bot.py`**:
   - Módulo assíncrono do Bot Admin do Telegram (`@TelaCheiaadmin_bot`) para automação de postagens.
   - **Fluxo 1 (Canal Público `@dramasleh`)**: Busca filmes no TMDB por nome, inclui a pergunta interativa do formato de áudio (`STATE_SELECT_AUDIO`: `🔊 DUBLADO`, `💬 LEGENDADO` ou `🔊💬 DUBLADO / LEGENDADO`), filtra e organiza a galeria de imagens (Pôsteres PT, EN, Variadas), gera a Copy de Vendas com o layout padrão estrito e botão Inline `[🔒 Solicitar Acesso Vitalício R$10,00]` direcionado para o Bot de Vendas `@TelaCheiaFilmes_bot` (`https://t.me/TelaCheiaFilmes_bot?start=comprar_vip`) e o botão de Suporte (`@leh_lurdes`), enviando com preview e confirmação para o admin publicar no canal público.
+  - **Fluxo 2 (Canal VIP)**: Publicação direta de mídia com suporte a canais protegidos (`noforwards=True`). Para arquivos que ultrapassam o limite de 2000 MB (2.0 GB) do Telegram em contas não-premium, o bot executa automaticamente o corte rápido via FFmpeg `-c copy` preservando dinamicamente a extensão original do arquivo (`.mp4`, `.mkv`, `.avi`, `.webm`, etc.), dividindo em 2 partes iguais (para arquivos de 2GB a 4GB) ou em 3 partes iguais (para arquivos > 4GB) e enviando cada uma sequencialmente com barra de progresso em tempo real (HTML `<code>` / `<b>`).
 - **`src/fast_telethon.py`**:
-  - Módulo de transferência de mídia em 32 partes concorrentes usando fila assíncrona (`asyncio.Queue`) e conexões MTProto paralelas (`_borrow_sender(dc_id)`). Acelera o download/upload de arquivos pesados (2GB+) de canais protegidos em até 20x.
+  - Módulo de transferência de mídia em 32 partes concorrentes usando fila assíncrona (`asyncio.Queue`) e conexões MTProto paralelas (`_borrow_sender(dc_id)`). Acelera o download/upload de arquivos pesados (2GB+) de canais protegidos em até 20x, utilizando aceleração de hardware C/Rust `AES-NI` (`cryptg` / `tgcrypto`).
 
 - **`run_bot.py`**:
   - Script principal na raiz para inicialização e execução contínua do Bot Admin do Telegram em segundo plano.
