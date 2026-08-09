@@ -32,7 +32,11 @@ secrets = {
     "AZURE_OPENAI_ENDPOINT": os.environ.get("AZURE_OPENAI_ENDPOINT", ""),
     "AZURE_OPENAI_API_KEY": os.environ.get("AZURE_OPENAI_API_KEY", ""),
     "AZURE_OPENAI_DEPLOYMENT": os.environ.get("AZURE_OPENAI_DEPLOYMENT", "gpt-4o"),
+    "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+    "TELEGRAM_VIP_CHANNEL_ID": os.environ.get("TELEGRAM_VIP_CHANNEL_ID", ""),
+    "ADMIN_CHAT_ID": os.environ.get("ADMIN_CHAT_ID", ""),
 }
+
 
 replaced_count = 0
 

@@ -38,6 +38,8 @@ from src.movie_selector import get_movie_by_tmdb_id, limpar_arquivos_locais_temp
 from src.drive_uploader import get_drive_service, limpar_temporarios_drive, upload_pasta_projeto
 from src.kaggle_trigger import trigger_kaggle_notebook
 from src.database import is_movie_posted, update_movie_status
+from src.thumbnail_generator import get_movie_images_tmdb, compose_thumbnail
+from src.post_guide_generator import generate_youtube_post_guide, save_post_guide_to_file
 
 import urllib.parse
 import time
@@ -134,6 +136,19 @@ STATE_RECEIVE_VIDEO, STATE_CONFIRM_VIDEO_TITLE, STATE_EDIT_VIP_TITLE = range(6, 
 
 # Estados da Conversa para Produzir Filme no Pipeline
 STATE_PRODUCE_CONFIRM, STATE_PRODUCE_INPUT_TITLE, STATE_PRODUCE_SELECT_MOVIE = range(9, 12)
+
+# Estados da Conversa para Thumbnail e Guia de Postagem do YouTube
+(
+    STATE_THUMB_START,
+    STATE_THUMB_INPUT_MANUAL,
+    STATE_THUMB_SELECT_BG,
+    STATE_THUMB_ASK_LOGO,
+    STATE_THUMB_SELECT_LOGO,
+    STATE_THUMB_SELECT_SCALE,
+    STATE_THUMB_SELECT_POSITION,
+    STATE_GUIDE_INPUT_TITLE
+) = range(12, 20)
+
 
 
 
@@ -1122,6 +1137,340 @@ async def run_pipeline_execution(target_query_or_msg, context: ContextTypes.DEFA
         except Exception:
             pass
 
+    # Transição automática para Etapa 1: Criação da Thumbnail (Capa 16:9)
+    await asyncio.sleep(2)
+    return await start_thumbnail_flow(target_query_or_msg, context, movie_info)
+
+
+# ==============================================================================
+# FLUXO DE THUMBNAIL (CAPA 16:9) E GUIA DE POSTAGEM DO YOUTUBE
+# ==============================================================================
+
+async def start_thumbnail_flow(target_query_or_msg, context: ContextTypes.DEFAULT_TYPE, movie_info: dict):
+    context.user_data["thumb_movie_info"] = movie_info
+    title = movie_info.get("title", "Filme")
+
+    text = (
+        f"🖼️ <b>ETAPA 1: CRIAÇÃO DA THUMBNAIL (CAPA 16:9 HD)</b>\n\n"
+        f"🎬 <b>Filme:</b> {title}\n\n"
+        f"Como deseja definir a imagem de fundo da capa?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("🖼️ Selecionar Backdrop do TMDB", callback_data="thumb_bg_tmdb")],
+        [InlineKeyboardButton("📤 Enviar Imagem Manual", callback_data="thumb_bg_manual")],
+        [InlineKeyboardButton("⏭️ Pular para Guia de Postagem", callback_data="skip_thumb_to_guide")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if hasattr(target_query_or_msg, 'reply_text'):
+        await target_query_or_msg.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    elif hasattr(target_query_or_msg, 'message'):
+        await target_query_or_msg.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+    return STATE_THUMB_START
+
+
+async def handle_thumb_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    movie_info = context.user_data.get("thumb_movie_info", {})
+    tmdb_id = movie_info.get("tmdb_id")
+
+    if data == "thumb_bg_tmdb":
+        await query.edit_message_text("🔎 Buscando imagens de fundo 16:9 (backdrops) no TMDB...")
+        imgs = get_movie_images_tmdb(tmdb_id) if tmdb_id else {"backdrops": [], "logos": []}
+        backdrops = imgs.get("backdrops", [])
+
+        if backdrops:
+            context.user_data["thumb_backdrops"] = backdrops[:6]
+            keyboard = []
+            for idx, b_url in enumerate(backdrops[:6], 1):
+                keyboard.append([InlineKeyboardButton(f"🖼️ Imagem de Fundo {idx}", callback_data=f"thumb_sel_bg:{idx-1}")])
+            keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
+
+            await query.edit_message_text(
+                "👇 <b>Selecione a imagem de fundo 16:9 desejada para a capa:</b>",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+            return STATE_THUMB_SELECT_BG
+        else:
+            await query.edit_message_text(
+                "⚠️ Nenhuma imagem de fundo encontrada no TMDB.\n\n"
+                "📤 Por favor, envie uma foto/imagem no chat para ser usada como fundo da capa:"
+            )
+            return STATE_THUMB_INPUT_MANUAL
+
+    elif data == "thumb_bg_manual":
+        await query.edit_message_text(
+            "📤 <b>Por favor, envie uma foto/imagem no chat para ser usada como fundo da capa:</b>",
+            parse_mode="HTML"
+        )
+        return STATE_THUMB_INPUT_MANUAL
+
+    elif data == "skip_thumb_to_guide":
+        return await start_post_guide_flow(query, context, movie_info)
+
+
+async def handle_thumb_manual_bg_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message.photo:
+        await update.message.reply_text("⚠️ Por favor, envie uma foto válida.")
+        return STATE_THUMB_INPUT_MANUAL
+
+    msg = await update.message.reply_text("⏳ Baixando e processando foto enviada...")
+    photo = update.message.photo[-1]
+    file_obj = await context.bot.get_file(photo.file_id)
+
+    movie_info = context.user_data.get("thumb_movie_info", {})
+    slug = movie_info.get("slug", "filme")
+    os.makedirs(f"temp/{slug}", exist_ok=True)
+    local_bg = f"temp/{slug}/manual_bg.png"
+
+    await file_obj.download_to_drive(local_bg)
+    context.user_data["thumb_selected_bg"] = local_bg
+
+    return await ask_thumb_logo(msg, context)
+
+
+async def handle_thumb_select_bg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":")[1])
+    backdrops = context.user_data.get("thumb_backdrops", [])
+
+    if 0 <= idx < len(backdrops):
+        context.user_data["thumb_selected_bg"] = backdrops[idx]
+        return await ask_thumb_logo(query, context)
+    else:
+        await query.edit_message_text("❌ Imagem inválida. Tente novamente.")
+        return ConversationHandler.END
+
+
+async def ask_thumb_logo(target_query_or_msg, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "✨ <b>Imagem de fundo selecionada com sucesso!</b>\n\n"
+        "Deseja adicionar a logo transparente oficial do filme na capa?"
+    )
+    keyboard = [
+        [InlineKeyboardButton("➕ Adicionar Logo Oficial", callback_data="thumb_logo_yes")],
+        [InlineKeyboardButton("⏭️ Manter Sem Logo", callback_data="thumb_logo_no")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if hasattr(target_query_or_msg, 'edit_message_text'):
+        await target_query_or_msg.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await target_query_or_msg.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+    return STATE_THUMB_ASK_LOGO
+
+
+async def handle_thumb_ask_logo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    movie_info = context.user_data.get("thumb_movie_info", {})
+    tmdb_id = movie_info.get("tmdb_id")
+
+    if data == "thumb_logo_no":
+        context.user_data["thumb_selected_logo"] = None
+        return await render_and_finish_thumbnail(query, context)
+
+    elif data == "thumb_logo_yes":
+        await query.edit_message_text("🔎 Buscando logos PNG transparentes no TMDB...")
+        imgs = get_movie_images_tmdb(tmdb_id) if tmdb_id else {}
+        logos = imgs.get("logos", [])
+
+        if logos:
+            context.user_data["thumb_logos"] = logos[:5]
+            keyboard = []
+            for idx in range(len(logos[:5])):
+                keyboard.append([InlineKeyboardButton(f"🎨 Logo Opção {idx+1}", callback_data=f"thumb_sel_logo:{idx}")])
+            keyboard.append([InlineKeyboardButton("❌ Sem Logo", callback_data="thumb_logo_no")])
+
+            await query.edit_message_text(
+                "👇 <b>Selecione a logo desejada da lista abaixo:</b>",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode="HTML"
+            )
+            return STATE_THUMB_SELECT_LOGO
+        else:
+            await query.edit_message_text("⚠️ Nenhuma logo transparente encontrada no TMDB. A capa será gerada sem logo.")
+            context.user_data["thumb_selected_logo"] = None
+            return await render_and_finish_thumbnail(query, context)
+
+
+async def handle_thumb_select_logo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":")[1])
+    logos = context.user_data.get("thumb_logos", [])
+
+    if 0 <= idx < len(logos):
+        context.user_data["thumb_selected_logo"] = logos[idx]
+
+        text = "📐 <b>Selecione a proporção do tamanho da logo relacionada à capa:</b>"
+        keyboard = [
+            [InlineKeyboardButton("15%", callback_data="thumb_scale:0.15"), InlineKeyboardButton("20%", callback_data="thumb_scale:0.20"), InlineKeyboardButton("25%", callback_data="thumb_scale:0.25")],
+            [InlineKeyboardButton("30%", callback_data="thumb_scale:0.30"), InlineKeyboardButton("35%", callback_data="thumb_scale:0.35"), InlineKeyboardButton("40%", callback_data="thumb_scale:0.40")]
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        return STATE_THUMB_SELECT_SCALE
+    else:
+        await query.edit_message_text("❌ Logo inválida.")
+        return ConversationHandler.END
+
+
+async def handle_thumb_select_scale_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    scale_val = float(query.data.split(":")[1])
+    context.user_data["thumb_logo_scale"] = scale_val
+
+    # Grid 3x3 de 9 botões de posição
+    text = "📍 <b>Selecione o local onde a logo ficará posicionada na capa:</b>"
+    keyboard = [
+        [
+            InlineKeyboardButton("↖️ Sup. Esquerdo", callback_data="thumb_pos:top_left"),
+            InlineKeyboardButton("⬆️ Cima", callback_data="thumb_pos:top_center"),
+            InlineKeyboardButton("↗️ Sup. Direito", callback_data="thumb_pos:top_right")
+        ],
+        [
+            InlineKeyboardButton("⬅️ Esquerda", callback_data="thumb_pos:middle_left"),
+            InlineKeyboardButton("⏺️ Centro", callback_data="thumb_pos:middle_center"),
+            InlineKeyboardButton("➡️ Direita", callback_data="thumb_pos:middle_right")
+        ],
+        [
+            InlineKeyboardButton("↙️ Inf. Esquerdo", callback_data="thumb_pos:bottom_left"),
+            InlineKeyboardButton("⬇️ Baixo", callback_data="thumb_pos:bottom_center"),
+            InlineKeyboardButton("↘️ Inf. Direito", callback_data="thumb_pos:bottom_right")
+        ]
+    ]
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    return STATE_THUMB_SELECT_POSITION
+
+
+async def handle_thumb_select_position_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    pos_val = query.data.split(":")[1]
+    context.user_data["thumb_logo_position"] = pos_val
+
+    return await render_and_finish_thumbnail(query, context)
+
+
+async def render_and_finish_thumbnail(query, context: ContextTypes.DEFAULT_TYPE):
+    movie_info = context.user_data.get("thumb_movie_info", {})
+    slug = movie_info.get("slug", "filme")
+
+    bg = context.user_data.get("thumb_selected_bg")
+    logo = context.user_data.get("thumb_selected_logo")
+    scale = context.user_data.get("thumb_logo_scale", 0.25)
+    pos = context.user_data.get("thumb_logo_position", "bottom_right")
+
+    msg_status = await (query.message if hasattr(query, 'message') else query).reply_text("⚙️ <b>Renderizando Thumbnail HD (1280x720 16:9)...</b>", parse_mode="HTML")
+
+    os.makedirs(f"temp/{slug}", exist_ok=True)
+    out_file = f"temp/{slug}/thumbnail.png"
+    compose_thumbnail(
+        bg_image_path_or_url=bg,
+        logo_image_path_or_url=logo,
+        logo_scale_pct=scale,
+        logo_position=pos,
+        output_path=out_file
+    )
+
+    drive = get_drive_service()
+    if drive:
+        upload_pasta_projeto(drive, slug, f"temp/{slug}")
+        from src.drive_uploader import salvar_no_drive
+        salvar_no_drive(drive, out_file, f"Movie-Pipeline/Resultados/{slug}_capa.png")
+
+    with open(out_file, "rb") as photo_f:
+        await context.bot.send_photo(
+            chat_id=query.message.chat_id,
+            photo=photo_f,
+            caption="🎉 <b>THUMBNAIL (CAPA 16:9) RENDERIZADA E SALVA NO GOOGLE DRIVE COM SUCESSO!</b>",
+            parse_mode="HTML"
+        )
+
+    return await start_post_guide_flow(msg_status, context, movie_info)
+
+
+async def start_post_guide_flow(target_query_or_msg, context: ContextTypes.DEFAULT_TYPE, movie_info: dict):
+    context.user_data["guide_movie_info"] = movie_info
+    title = movie_info.get("title", "")
+
+    sug_title = f"{title.upper()} COMPLETO DUBLADO | ASSISTA FULL HD GRÁTIS"
+    context.user_data["suggested_yt_title"] = sug_title
+
+    text = (
+        f"📝 <b>ETAPA 2: GUIA DE POSTAGEM DO YOUTUBE</b>\n\n"
+        f"🎬 <b>Filme:</b> {title}\n\n"
+        f"Digite um <b>Título Chamativo / Gancho de Captura</b> para o vídeo do YouTube:\n\n"
+        f"<i>Sugestão Automática:</i>\n<code>{sug_title}</code>\n\n"
+        f"<i>(Você pode clicar no botão abaixo para usar a sugestão ou digitar o seu título no chat):</i>"
+    )
+    keyboard = [
+        [InlineKeyboardButton("⚡ Usar Título Sugerido", callback_data="guide_use_suggested_title")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    if hasattr(target_query_or_msg, 'reply_text'):
+        await target_query_or_msg.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    elif hasattr(target_query_or_msg, 'message'):
+        await target_query_or_msg.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+    return STATE_GUIDE_INPUT_TITLE
+
+
+async def handle_guide_title_input_or_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    custom_title = None
+
+    if update.callback_query:
+        query = update.callback_query
+        await query.answer()
+        if query.data == "guide_use_suggested_title":
+            custom_title = context.user_data.get("suggested_yt_title")
+        elif query.data == "cancel_post":
+            await query.edit_message_text("❌ Guia cancelado.")
+            return ConversationHandler.END
+    elif update.message and update.message.text:
+        custom_title = update.message.text.strip()
+
+    movie_info = context.user_data.get("guide_movie_info", {})
+    slug = movie_info.get("slug", "filme")
+
+    msg_target = (update.callback_query.message if update.callback_query else update.message)
+    msg = await msg_target.reply_text("⚙️ Gerando Guia de Postagem formatado do YouTube...")
+
+    guide_data = generate_youtube_post_guide(movie_info, custom_title=custom_title)
+    txt_path = save_post_guide_to_file(guide_data, output_dir=f"temp/{slug}")
+
+    drive = get_drive_service()
+    if drive:
+        upload_pasta_projeto(drive, slug, f"temp/{slug}")
+
+    final_msg = (
+        f"🎉 <b>GUIA DE POSTAGEM DO YOUTUBE PRONTO!</b>\n\n"
+        f"📌 <b>TÍTULO DO YOUTUBE:</b>\n"
+        f"<code>{guide_data['youtube_title']}</code>\n\n"
+        f"--------------------------------------------------\n"
+        f"📄 <b>DESCRIÇÃO COMPLETA (Copie e Cole no YouTube):</b>\n"
+        f"<code>{guide_data['description']}</code>\n\n"
+        f"--------------------------------------------------\n"
+        f"🏷️ <b>TAGS (Separadas por Vírgula):</b>\n"
+        f"<code>{guide_data['tags']}</code>\n\n"
+        f"==================================================\n"
+        f"☁️ <b>Google Drive:</b> Guia salvo em <code>Movie-Pipeline/Projetos/{slug}/guia_postagem.txt</code> e <code>.json</code>!"
+    )
+
+    await msg.reply_text(final_msg, parse_mode="HTML")
+    return ConversationHandler.END
+
+
 
 
 
@@ -1152,8 +1501,34 @@ def create_telegram_bot_app() -> Application:
             ],
             STATE_PRODUCE_SELECT_MOVIE: [
                 CallbackQueryHandler(handle_produce_select_movie_callback, pattern="^(prod_sel_id:|cancel_post)")
+            ],
+            STATE_THUMB_START: [
+                CallbackQueryHandler(handle_thumb_start_callback, pattern="^(thumb_bg_tmdb|thumb_bg_manual|skip_thumb_to_guide)$")
+            ],
+            STATE_THUMB_INPUT_MANUAL: [
+                MessageHandler(filters.PHOTO, handle_thumb_manual_bg_input)
+            ],
+            STATE_THUMB_SELECT_BG: [
+                CallbackQueryHandler(handle_thumb_select_bg_callback, pattern="^thumb_sel_bg:")
+            ],
+            STATE_THUMB_ASK_LOGO: [
+                CallbackQueryHandler(handle_thumb_ask_logo_callback, pattern="^(thumb_logo_yes|thumb_logo_no)$")
+            ],
+            STATE_THUMB_SELECT_LOGO: [
+                CallbackQueryHandler(handle_thumb_select_logo_callback, pattern="^(thumb_sel_logo:|thumb_logo_no)")
+            ],
+            STATE_THUMB_SELECT_SCALE: [
+                CallbackQueryHandler(handle_thumb_select_scale_callback, pattern="^thumb_scale:")
+            ],
+            STATE_THUMB_SELECT_POSITION: [
+                CallbackQueryHandler(handle_thumb_select_position_callback, pattern="^thumb_pos:")
+            ],
+            STATE_GUIDE_INPUT_TITLE: [
+                CallbackQueryHandler(handle_guide_title_input_or_callback, pattern="^(guide_use_suggested_title|cancel_post)$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_guide_title_input_or_callback)
             ]
         },
+
         fallbacks=[
             CommandHandler("cancel", lambda u, c: ConversationHandler.END),
             CommandHandler("start", start_command)
