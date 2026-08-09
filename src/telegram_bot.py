@@ -2115,8 +2115,37 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
             return STATE_YT_SELECT_MOVIE
         movie_info = get_movie_details(results[0]["id"], language="pt-BR")
 
-    title_clean = movie_info.get("title", "")
-    slug = movie_info.get("slug") or movie_info.get("original_title", "").lower().replace(" ", "_")
+    title_pt = movie_info.get("title", "")
+    release_date = movie_info.get("release_date", "")
+    year = release_date[:4] if release_date else ""
+
+    # Gera lista de slugs candidatas (dando prioridade total ao titulo em portugues + ano)
+    import re
+    slug_candidates = []
+    if movie_info.get("slug"):
+        slug_candidates.append(movie_info.get("slug"))
+
+    clean_title = re.sub(r"[^\w\s]", "", title_pt.lower())
+    slug_pt = "_".join(clean_title.split())
+    if year:
+        slug_candidates.append(f"{slug_pt}_{year}")
+    slug_candidates.append(slug_pt)
+
+    orig_title = movie_info.get("original_title", "")
+    if orig_title:
+        clean_orig = re.sub(r"[^\w\s]", "", orig_title.lower())
+        slug_orig = "_".join(clean_orig.split())
+        if year:
+            slug_candidates.append(f"{slug_orig}_{year}")
+        slug_candidates.append(slug_orig)
+
+    # Escolhe a slug que realmente existe nas pastas locais ou no Drive
+    slug = slug_candidates[0]
+    for cand in slug_candidates:
+        if os.path.exists(f"temp/{cand}") or os.path.exists(f"output/{cand}.mp4") or os.path.exists(f"temp/{cand}.txt"):
+            slug = cand
+            break
+
     context.user_data["yt_movie_info"] = movie_info
     context.user_data["yt_slug"] = slug
 
@@ -2146,9 +2175,11 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
 
     context.user_data["yt_guide"] = guide_data
 
-
     # Localiza o vídeo MP4 local ou faz download do Drive
     video_path = f"output/{slug}.mp4"
+    if not os.path.exists(video_path):
+        video_path = f"temp/{slug}/{slug}.mp4"
+
     if not os.path.exists(video_path):
         os.makedirs(f"temp/{slug}", exist_ok=True)
         drive = get_drive_service()
@@ -2169,6 +2200,7 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
                 thumb_path = d_thumb
 
     context.user_data["yt_thumb_path"] = thumb_path if os.path.exists(thumb_path) else None
+
 
     has_video = os.path.exists(video_path)
     preview_msg = (
