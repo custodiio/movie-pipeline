@@ -4,6 +4,8 @@ Envia o vídeo produzido para o canal do YouTube no modo Privado com Título, De
 """
 
 import os
+import re
+import time
 import logging
 from typing import Dict, Any, Union, List
 
@@ -12,6 +14,48 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_youtube_tags(raw_tags: Union[str, List[str]]) -> List[str]:
+    """
+    Sanitiza e valida a lista de tags para seguir rigorosamente as regras da YouTube Data API v3:
+    - Remove caracteres proibidos (<, >, #, \\n, \\r, ;)
+    - Garante que cada tag tenha no máximo 100 caracteres
+    - Garante que a soma total de todas as tags não ultrapasse 450 caracteres (limite do YouTube é 500)
+    """
+    if not raw_tags:
+        return []
+
+    if isinstance(raw_tags, str):
+        cleaned_str = raw_tags.replace("\n", ",").replace("\r", ",").replace(";", ",")
+        candidates = cleaned_str.split(",")
+    elif isinstance(raw_tags, list):
+        candidates = raw_tags
+    else:
+        return []
+
+    valid_tags = []
+    total_len = 0
+
+    for tag in candidates:
+        if not isinstance(tag, str):
+            continue
+        t = tag.strip()
+        t = re.sub(r"[<>#]", "", t)   # Remove caracteres inválidos no YouTube (<, >, #)
+        t = re.sub(r"\s+", " ", t)     # Remove espaços duplos / quebras de linha internos
+        if not t:
+            continue
+
+        t = t[:100]  # Limita cada tag a 100 caracteres
+        tag_len = len(t) + 1
+        if total_len + tag_len > 450:
+            break
+
+        if t not in valid_tags:
+            valid_tags.append(t)
+            total_len += tag_len
+
+    return valid_tags
 
 
 def upload_video_to_youtube(
@@ -26,7 +70,6 @@ def upload_video_to_youtube(
     """
     Realiza o upload do vídeo para o YouTube no modo Privado via API v3.
     """
-    import time
     refresh_token = os.getenv("YOUTUBE_REFRESH_TOKEN") or os.getenv("DRIVE_REFRESH_TOKEN")
     client_id = os.getenv("YOUTUBE_CLIENT_ID") or os.getenv("DRIVE_CLIENT_ID")
     client_secret = os.getenv("YOUTUBE_CLIENT_SECRET") or os.getenv("DRIVE_CLIENT_SECRET")
@@ -43,10 +86,7 @@ def upload_video_to_youtube(
             "error": f"Arquivo de vídeo local não encontrado: {video_path}"
         }
 
-    if isinstance(tags, str):
-        tags_list = [t.strip() for t in tags.split(",") if t.strip()]
-    else:
-        tags_list = tags or []
+    tags_list = sanitize_youtube_tags(tags)
 
     try:
         credentials = Credentials(
@@ -58,13 +98,12 @@ def upload_video_to_youtube(
             scopes=None
         )
 
-
         youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
 
         body = {
             "snippet": {
                 "title": title[:100],
-                "description": description,
+                "description": description[:5000] if description else "",
                 "tags": tags_list,
                 "categoryId": "24"  # 24 = Entertainment / Cinema & Filmes
             },
@@ -75,6 +114,8 @@ def upload_video_to_youtube(
         }
 
         logger.info(f"📤 Uploading para o YouTube ({privacy_status}): '{title[:100]}'")
+        logger.info(f"🏷️ Tags Sanitizadas ({len(tags_list)}): {tags_list}")
+
         media = MediaFileUpload(video_path, chunksize=1024 * 1024 * 10, resumable=True, mimetype="video/mp4")
         request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
 
@@ -106,8 +147,6 @@ def upload_video_to_youtube(
                             progress_callback(pct, getattr(status, 'resumable_progress', 0), getattr(status, 'total_size', file_size))
                         except Exception as p_err:
                             logger.warning(f"Aviso progress callback: {p_err}")
-
-
 
         video_id = response.get("id")
         video_url = f"https://youtu.be/{video_id}"
