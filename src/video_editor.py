@@ -184,32 +184,24 @@ def render_movie_video(
     # 4. Filtergraph Unificado (Redimensiona fotos + queima a legenda animada em PASSADA ÚNICA)
     vf_combined = f"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,ass='{ass_path_escaped}'"
 
-    # 5. Detecta suporte a GPU NVENC
-    nvenc_available = False
-    try:
-        check_nvenc = subprocess.run(["ffmpeg", "-encoders"], capture_output=True, text=True)
-        if "h264_nvenc" in check_nvenc.stdout:
-            nvenc_available = True
-    except Exception:
-        pass
+    vcodec = "libx264"
+    preset = "ultrafast"
 
-    vcodec = "h264_nvenc" if nvenc_available else "libx264"
-    preset = "p1" if nvenc_available else "ultrafast"
-
-    logging.info(f"🎨 PASSADA ÚNICA: Renderizando bloco do filme ({narration_duration:.1f}s = {narration_duration/60:.1f}min) com codec {vcodec}...")
+    logging.info(f"🎨 PASSADA ÚNICA: Renderizando bloco do filme ({narration_duration:.1f}s = {narration_duration/60:.1f}min) com codec {vcodec} (preset {preset})...")
 
     cmd_single_pass = [
         "ffmpeg", "-y",
         "-f", "concat", "-safe", "0", "-i", concat_txt_path,
         "-i", voiceover_path,
         "-vf", vf_combined,
-        "-c:v", vcodec, "-preset", preset,
+        "-c:v", vcodec, "-preset", preset, "-threads", "0",
         "-pix_fmt", "yuv420p", "-r", "30",
         "-c:a", "aac", "-ar", "44100", "-ac", "2", "-b:a", "192k",
         "-shortest",
         bloco_queimado_temp
     ]
     subprocess.run(cmd_single_pass, check=True)
+
 
     # 6. Normalização da vinheta Intro (se existir)
     has_intro = False
