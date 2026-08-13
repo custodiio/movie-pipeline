@@ -11,3 +11,5 @@ intro.mp4
 *.mkv
 *.session
 *.session-journal
+get_yt_token_local.py
+get_yt_token_project5931.py
