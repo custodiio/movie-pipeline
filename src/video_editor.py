@@ -55,10 +55,10 @@ def get_audio_duration(audio_path: str) -> float:
         return 60.0
 
 
-def generate_dvd_bounce_ass(output_ass_path: str, duration_sec: float, width: int = 1920, height: int = 1080) -> str:
+def generate_dvd_bounce_ass(output_ass_path: str, duration_sec: float, width: int = 1920, height: int = 1080, font_name: str = "Bungee") -> str:
     """
     Gera um arquivo de legendas .ass com animação de movimento quicante (DVD Bounce)
-    para o texto da marca d'água com opacidade 30% (Alpha &H4D) e estilo Bungee em tamanho grande (65pt).
+    para o texto da marca d'água com opacidade 30% (Alpha &H4D) e fonte configurável em tamanho grande (65pt).
     """
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -68,8 +68,8 @@ WrapStyle: 0
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: DVDBounce,Bungee,65,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,1,2,0,5,10,10,10,1
-Style: DVDBounceSub,Bungee,38,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,0,0,0,0,100,100,0,0,1,1,0,5,10,10,10,1
+Style: DVDBounce,{font_name},65,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,-1,0,0,0,100,100,0,0,1,2,0,5,10,10,10,1
+Style: DVDBounceSub,{font_name},38,&H4DFFFFFF,&H4DFFFFFF,&H4D000000,&H4D000000,0,0,0,0,100,100,0,0,1,1,0,5,10,10,10,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -153,7 +153,8 @@ def render_movie_video(
     voiceover_path: str,
     output_dir: str = OUTPUT_DIR_DEFAULT,
     intro_path: str = INTRO_PATH_DEFAULT,
-    target_min_hours: float = 1.0
+    target_runtime_minutes: float = 110.0,
+    watermark_font: str = "Bungee"
 ) -> str:
     """
     Renderiza o vídeo final com alta performance em PASSADA ÚNICA (Single-Pass Filtergraph).
@@ -177,12 +178,12 @@ def render_movie_video(
     # 2. Gera o arquivo de concat das imagens para a duração da narração
     concat_txt_path = build_slideshow_concat_script(images, narration_duration, temp_dir)
 
-    # 3. Gera a legenda animada .ass (DVD Bounce)
-    generate_dvd_bounce_ass(ass_path, narration_duration + 10.0)
+    # 3. Gera a legenda animada .ass (DVD Bounce) com a fonte configurável
+    generate_dvd_bounce_ass(ass_path, narration_duration + 10.0, font_name=watermark_font)
     ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
 
     # 4. Filtergraph Unificado (Redimensiona fotos + queima a legenda animada em PASSADA ÚNICA)
-    vf_combined = f"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,ass='{ass_path_escaped}'"
+    vf_combined = f"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,fps=30,ass='{ass_path_escaped}'"
 
     vcodec = "libx264"
     preset = "ultrafast"
@@ -220,12 +221,12 @@ def render_movie_video(
         except Exception as intro_err:
             logging.warning(f"Aviso ao normalizar vinheta intro: {intro_err}")
 
-    # 7. Loop Instantâneo via -c copy (executa em 2 segundos!)
-    target_sec = target_min_hours * 3600.0 if target_min_hours > 5.0 else target_min_hours * 60.0
+    # 7. Loop Instantâneo via -c copy (executa em 2 segundos!) + corte exato com -t
+    target_sec = target_runtime_minutes * 60.0
     num_loops = math.ceil(target_sec / narration_duration)
-    total_dur_min = (narration_duration * num_loops) / 60.0
+    total_dur_min = target_runtime_minutes
 
-    logging.info(f"⚡ Loop instantâneo (-c copy): multiplicando bloco {num_loops}x ({total_dur_min:.1f} min)...")
+    logging.info(f"⚡ Loop instantâneo (-c copy): multiplicando bloco {num_loops}x e cortando em {total_dur_min:.1f} min exatos...")
 
     concat_stream_list = os.path.join(temp_dir, "concat_stream.txt")
     concat_lines = []
@@ -244,6 +245,7 @@ def render_movie_video(
         "-f", "concat", "-safe", "0",
         "-i", concat_stream_list,
         "-c", "copy",
+        "-t", str(target_sec),
         final_output_path
     ]
     subprocess.run(cmd_fast_concat, check=True)

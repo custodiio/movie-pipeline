@@ -53,7 +53,7 @@ Tabela `movies`:
   - Concatenação com a vinheta oficial `intro.mp4`.
   - Slideshow ultra-estável com durações de 5.0s a 10.0s por imagem perfeitamente sincronizadas com o áudio da narração.
   - Marca d'água animada estilo DVD bounce com `\move` ASS legível, gigante (65pt Bungee) e lenta (12s por travessia), com coordenadas e milissegundos explícitos `\move(x1,y1,x2,y2,0,12000)`.
-  - Renderização otimizada em 3 etapas ultra-rápidas (Passo 1: Concatena slideshow base puro de fotos para o tempo da narração; Passo 2: Renderiza e queima a legenda ASS 65pt + áudio da narração no bloco do filme em 1 única passada; Passo 3: Concatena vinheta intro + repetições do bloco queimado via stream copy `-c copy` instantâneo em 2 segundos para atingir a duração total do TXT).
+  - Renderização otimizada em Passada Única + Loop Instantâneo: Concatena slideshow de fotos + queima a legenda ASS 65pt animada (DVD bounce `\move`) + áudio da narração em 1 única passada FFmpeg. **CRÍTICO**: O filtergraph usa `fps=30` **antes** do `ass=` para garantir que o libass receba 30 frames/segundo e interpole corretamente a animação `\move` (sem isso, o concat de imagens gera 1 frame a cada 5-10s e a legenda fica estática). Por fim, concatena vinheta intro + repetições do bloco queimado via stream copy `-c copy` instantâneo com `-t` para cortar **exatamente** na duração alvo.
   - Salva em `output/<slug>.mp4`.
 
 
