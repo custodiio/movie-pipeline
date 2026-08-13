@@ -51,8 +51,8 @@ Tabela `movies`:
 - **`src/video_editor.py`**:
   - Renderizador de vídeo no FFmpeg com aceleração por hardware GPU Nvidia NVENC (`h264_nvenc`) a 250+ FPS ou CPU ultra-rápida.
   - Concatenação com a vinheta oficial `intro.mp4`.
-  - Slideshow ultra-estável com durações alternadas de 5.0s a 8.0s por imagem (máximo < 10s estrito e sem repetições consecutivas) perfeitamente sincronizadas com o áudio da narração.
-  - Marca d'água animada estilo DVD bounce com `\move` ASS legível, gigante (65pt) com movimento sincronizado em travessias de 8s.
+  - Slideshow ultra-estável com durações alternadas e dinâmicas de 3.5s a 6.0s por imagem (máximo estrito de 6s por foto, sem repetições consecutivas e com desduplicação visual por hash MD5) perfeitamente sincronizadas com o áudio da narração.
+  - Marca d'água animada estilo DVD bounce com `\move` ASS legível, gigante (65pt) com movimento acelerado e alinhado em travessias de 6s.
   - Renderização otimizada em Passada Única + Loop Instantâneo: Concatena slideshow de fotos + queima a legenda ASS 65pt animada (DVD bounce `\move`) + áudio da narração em 1 única passada FFmpeg com `fps=30` antes do `ass=` para interpolar a animação `\move`. Por fim, concatena vinheta intro + repetições do bloco queimado via stream copy `-c copy` instantâneo.
   - Salva em `output/<slug>.mp4`.
 
