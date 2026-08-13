@@ -26,7 +26,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 OUTPUT_DIR_DEFAULT = "output"
 INTRO_PATH_DEFAULT = os.getenv("INTRO_PATH", r"D:\Applications\Movie-Pipeline\intro.mp4")
 
-WATERMARK_TEXT_MAIN = "ASSISTA COMPLETO NO TELEGRAM ➔ @LehDramas"
+WATERMARK_TEXT_MAIN = "Saiba mais pelo telegram ➔ @LehDramas"
 WATERMARK_TEXT_SUB  = "(Link Direto no 1º Comentário Fixado)"
 
 def get_audio_duration(audio_path: str) -> float:
@@ -172,8 +172,7 @@ def render_movie_video(
     ass_path = os.path.join(temp_dir, "watermark.ass")
 
     # 1. Duração do áudio da narração
-    audio_seg = AudioSegment.from_file(voiceover_path)
-    narration_duration = len(audio_seg) / 1000.0
+    narration_duration = get_audio_duration(voiceover_path)
 
     # 2. Gera o arquivo de concat das imagens para a duração da narração
     concat_txt_path = build_slideshow_concat_script(images, narration_duration, temp_dir)
