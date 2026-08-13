@@ -86,7 +86,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     ]
     
     t = 0.0
-    step = 6.0 # 6 segundos por travessia de canto a canto (ritmo dinâmico alinhado à troca de fotos)
+    step = 10.0 # 10 segundos por travessia de canto a canto (sincronizado com os 10s por imagem)
 
     pos_idx = 0
     
@@ -120,32 +120,25 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return output_ass_path
 
 def build_slideshow_concat_script(images: list[str], target_duration: float, temp_dir: str) -> str:
-    """Gera um arquivo txt de concat do FFmpeg repetindo as imagens em loop com tempos alternados dinâmicos (3.5 a 6.0s) sem repetições consecutivas."""
+    """Gera um arquivo txt de concat do FFmpeg com cada imagem durando EXATAMENTE 10.00s em loop contínuo até cobrir a narração."""
     concat_txt = os.path.join(temp_dir, "slideshow_list.txt")
-    current_time = 0.0
+    curr = 0.0
+    safety_target = target_duration + 35.0  # Garante que a trilha visual seja sempre mais longa que o áudio (-shortest corta com precisão)
     lines = []
-    last_img = None
+    img_idx = 0
     
-    img_pool = list(images)
+    img_pool = [os.path.abspath(img).replace("\\", "/") for img in images]
     if not img_pool:
         raise ValueError("Nenhuma imagem fornecida para o slideshow.")
 
-    while current_time < target_duration:
-        shuffled = list(img_pool)
-        random.shuffle(shuffled)
-        for img_path in shuffled:
-            if img_path == last_img and len(img_pool) > 1:
-                continue
-            dur = round(random.uniform(3.5, 6.0), 2)
-            clean_path = os.path.abspath(img_path).replace("\\", "/")
-            lines.append(f"file '{clean_path}'")
-            lines.append(f"duration {dur:.2f}")
-            current_time += dur
-            last_img = img_path
-            if current_time >= target_duration:
-                break
-                
-    lines.append(f"file '{os.path.abspath(img_pool[0]).replace('\\', '/')}'")
+    while curr < safety_target:
+        img_path = img_pool[img_idx % len(img_pool)]
+        lines.append(f"file '{img_path}'")
+        lines.append("duration 10.00")
+        curr += 10.0
+        img_idx += 1
+
+    lines.append(f"file '{img_pool[0]}'")
 
     with open(concat_txt, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
