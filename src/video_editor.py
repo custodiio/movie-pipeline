@@ -86,7 +86,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     ]
     
     t = 0.0
-    step = 12.0 # 12 segundos por travessia de canto a canto
+    step = 8.0 # 8 segundos por travessia de canto a canto (sincronizado com a troca de fotos)
 
     pos_idx = 0
     
@@ -120,24 +120,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     return output_ass_path
 
 def build_slideshow_concat_script(images: list[str], target_duration: float, temp_dir: str) -> str:
-    """Gera um arquivo txt de concat do FFmpeg repetindo as imagens em loop com tempos alternados (5 a 10s)."""
+    """Gera um arquivo txt de concat do FFmpeg repetindo as imagens em loop com tempos alternados (5 a 8s) sem repetições consecutivas."""
     concat_txt = os.path.join(temp_dir, "slideshow_list.txt")
     current_time = 0.0
     lines = []
+    last_img = None
     
     img_pool = list(images)
     if not img_pool:
         raise ValueError("Nenhuma imagem fornecida para o slideshow.")
 
     while current_time < target_duration:
-        random.shuffle(img_pool)
-        for img_path in img_pool:
-            dur = random.uniform(5.0, 10.0)
-
+        shuffled = list(img_pool)
+        random.shuffle(shuffled)
+        for img_path in shuffled:
+            if img_path == last_img and len(img_pool) > 1:
+                continue
+            dur = round(random.uniform(5.0, 8.0), 2)
             clean_path = os.path.abspath(img_path).replace("\\", "/")
             lines.append(f"file '{clean_path}'")
             lines.append(f"duration {dur:.2f}")
             current_time += dur
+            last_img = img_path
             if current_time >= target_duration:
                 break
                 
