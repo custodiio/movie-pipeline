@@ -5,6 +5,8 @@ __pycache__/
 output/
 temp/
 temp_vip_downloads/
+temp_torrent_downloads/
+bin/
 scratch/
 intro.mp4
 *.mp4

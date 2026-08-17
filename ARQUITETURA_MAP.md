@@ -82,6 +82,7 @@ Tabela `movies`:
   - **Fluxo 2 (Canal VIP)**: Publicação direta de mídia com suporte a canais protegidos (`noforwards=True`). Para arquivos que ultrapassam o limite de 2000 MB (2.0 GB) do Telegram em contas não-premium, o bot executa automaticamente o corte rápido via FFmpeg `-c copy` preservando dinamicamente a extensão original do arquivo (`.mp4`, `.mkv`, `.avi`, `.webm`, etc.), dividindo em 2 partes iguais (para arquivos de 2GB a 4GB) ou em 3 partes iguais (para arquivos > 4GB) e enviando cada uma sequencialmente com barra de progresso em tempo real (HTML `<code>` / `<b>`).
   - **Fluxo 3 (Produzir Filme - Pipeline)**: Pesquisa o filme em alta no TMDB que ainda não foi postado e solicita confirmação do admin (`[✅ Confirmar Produção]` ou `[✏️ Definir Título Manualmente]`). Ao confirmar, realiza a limpeza completa dos arquivos temporários locais (`temp/` e `output/`) e no Google Drive (`Movie-Pipeline/Projetos/`), faz upload do arquivo de metadados (`.txt`), dispara o pipeline no Kaggle via GitHub Actions com GPU Tesla T4 e atualiza o status do banco SQLite para `'selected'` e posteriormente para `'concluido'` ao finalizar a renderização.
   - **Fluxo 4 (Gerador de Thumbnail 16:9 & Guia do YouTube)**: Permite a seleção de imagem de fundo 16:9 (via TMDB Backdrops ou envio manual no chat), aplicação da logo transparente do filme com proporção escalável (15% a 40%) e posicionamento em grid de 9 posições via Pillow (PIL). Conduz a geração do Guia de Postagem do YouTube contendo Título de Captura, Descrição Padrão formatada com elenco/diretor real, CTAs e Disclaimer fixo, e Tags de alta relevância separadas por vírgula, salvando `guia_postagem.txt`/`.json` e `thumbnail.png` no Google Drive.
+  - **Fluxo 5 (Baixar Torrent Magnet p/ VIP)**: Permite o envio de qualquer link Magnet (`magnet:?xt=urn:btih:...`) via botão no menu ou comando (`/torrent`, `/magnet`), realiza o download em velocidade máxima via Aria2c com mais de 12 rastreadores públicos injetados, exibe o progresso em tempo real (taxa MB/s, % e ETA), divide arquivos > 2GB/4GB instantaneamente com FFmpeg `-c copy` e realiza o upload para o Canal VIP via Telethon MTProto com barra de progresso.
 - **`src/thumbnail_generator.py`**:
   - Módulo de busca de imagens HD 16:9 (backdrops e logos transparentes) no TMDB e composição visual de Thumbnails em 1280x720 com sobreposição proporcional e posicionamento em 9 quadrantes via Pillow (PIL).
 - **`src/post_guide_generator.py`**:
@@ -98,6 +99,13 @@ Tabela `movies`:
 - **`inject_secrets.py`**:
   - Script que injeta as secrets do GitHub Actions (`TELEGRAM_BOT_TOKEN`, `ADMIN_CHAT_ID`, `TELEGRAM_VIP_CHANNEL_ID`, `TMDB_API_KEY`, etc.) diretamente no código do notebook master antes do disparo para o Kaggle.
 
+
+- **`src/torrent_downloader.py`**:
+  - Motor de download de Torrent de alta velocidade utilizando `Aria2c` portátil/nativo com injeção dinâmica dos melhores rastreadores públicos (`PUBLIC_TRACKERS`).
+  - Suporta DHT, PEX, LPD e até 120 peers/conexões simultâneas com alocação rápida de arquivos no disco.
+  - Parser regex em tempo real do progresso do Aria2c (taxa em MB/s, % concluído, MB/GB baixados, peers/sementes e ETA).
+  - Identificação e priorização automática de arquivos de vídeo (`.mkv`, `.mp4`, `.avi`, `.mov`, `.webm`, `.ts`, `.m4v`).
+  - Divisão instantânea de arquivos sem perda de qualidade via FFmpeg Stream Copy (`-c copy`) caso o vídeo ultrapasse o limite configurado (> 2GB / 4GB).
 
 - **`src/fast_telethon.py`**:
   - Módulo de transferência de mídia em 32 partes concorrentes usando fila assíncrona (`asyncio.Queue`) e conexões MTProto paralelas (`_borrow_sender(dc_id)`). Acelera o download/upload de arquivos pesados (2GB+) de canais protegidos em até 20x, utilizando aceleração de hardware C/Rust `AES-NI` (`cryptg` / `tgcrypto`).

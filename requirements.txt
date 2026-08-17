@@ -8,4 +8,7 @@ google-auth-oauthlib
 openai
 telethon
 cryptg
+psycopg2-binary
+gradio
+
 

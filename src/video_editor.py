@@ -1,23 +1,20 @@
 """
-Módulo de Edição e Renderização de Vídeo (FFmpeg / OpenCV / ASS Subtitles)
+Módulo de Edição e Renderização de Vídeo (FFmpeg / ASS Subtitles)
 
 Monta o vídeo final unindo:
-1. Intro do canal (sem loop no início)
-2. Slideshow das imagens (16:9 / 1:1) com duração alternada (5-10s) em loop
-3. Marca d'água animada estilo DVD bounce com opacidade 30% e fonte Bungee
+1. Intro do canal (se disponível)
+2. Slideshow das imagens (16:9 / 1:1) com duração de 6.0s por foto (nunca ultrapassa 10s)
+3. Marca d'água animada estilo DVD bounce contínua (6.0s por travessia sem travamento)
 4. Áudio da narração em alta fidelidade
-5. Renderização ultra-rápida em Passada Única (Single-Pass Filtergraph) + Aceleração GPU NVENC
-6. Loop instantâneo via stream copy (-c copy) em segundos
+5. Renderização ultra-rápida em Passada Única (Single-Pass Filtergraph)
+6. Loop instantâneo via stream copy (-c copy) para cobrir a duração total do filme
 """
 
 import os
-import random
 import math
 import logging
 import subprocess
 from dotenv import load_dotenv
-
-
 
 load_dotenv()
 
@@ -28,6 +25,7 @@ INTRO_PATH_DEFAULT = os.getenv("INTRO_PATH", r"D:\Applications\Movie-Pipeline\in
 
 WATERMARK_TEXT_MAIN = "Saiba mais pelo telegram ➔ @LehDramas"
 WATERMARK_TEXT_SUB  = "(Link Direto no 1º Comentário Fixado)"
+
 
 def get_audio_duration(audio_path: str) -> float:
     """Retorna a duração exata do arquivo de áudio em segundos."""
@@ -58,7 +56,7 @@ def get_audio_duration(audio_path: str) -> float:
 def generate_dvd_bounce_ass(output_ass_path: str, duration_sec: float, width: int = 1920, height: int = 1080, font_name: str = "Bungee") -> str:
     """
     Gera um arquivo de legendas .ass com animação de movimento quicante (DVD Bounce)
-    para o texto da marca d'água com opacidade 30% (Alpha &H4D) e fonte configurável em tamanho grande (65pt).
+    para o texto da marca d'água com travessias contínuas de 6.0s sincronizadas com a troca de fotos.
     """
     header = f"""[Script Info]
 ScriptType: v4.00+
@@ -86,25 +84,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     ]
     
     t = 0.0
-    step = 10.0 # 10 segundos por travessia de canto a canto (sincronizado com os 10s por imagem)
-
+    step = 6.0  # 6.0 segundos por travessia de canto a canto (dinâmico, nunca ultrapassa 10s)
     pos_idx = 0
     
     def format_time(seconds: float) -> str:
         h = int(seconds // 3600)
         m = int((seconds % 3600) // 60)
         s = int(seconds % 60)
-        cs = int((seconds - int(seconds)) * 100)
+        cs = int(round((seconds - int(seconds)) * 100))
+        if cs >= 100:
+            s += 1
+            cs = 0
         return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
-    while t < duration_sec:
-        t_end = min(t + step, duration_sec)
+    safety_duration = duration_sec + 180.0  # Garante que a animação vá além da duração total do bloco
+    while t < safety_duration:
+        t_end = t + step
         p1 = positions[pos_idx % len(positions)]
         p2 = positions[(pos_idx + 1) % len(positions)]
         
         t_start_str = format_time(t)
         t_end_str = format_time(t_end)
-        dur_ms = int((t_end - t) * 1000)
+        dur_ms = int(step * 1000)
         
         move_tag = f"\\move({p1[0]},{p1[1]},{p2[0]},{p2[1]},0,{dur_ms})"
         line_main = f"Dialogue: 0,{t_start_str},{t_end_str},DVDBounce,,0,0,0,,{{{move_tag}}}{WATERMARK_TEXT_MAIN}\\N{WATERMARK_TEXT_SUB}"
@@ -119,11 +120,15 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         
     return output_ass_path
 
+
 def build_slideshow_concat_script(images: list[str], target_duration: float, temp_dir: str) -> str:
-    """Gera um arquivo txt de concat do FFmpeg com cada imagem durando EXATAMENTE 10.00s em loop contínuo até cobrir a narração."""
+    """
+    Gera o arquivo txt de concat do FFmpeg com cada imagem durando EXATAMENTE 6.00s.
+    Garante troca constante a cada 6s sem exceder 10s em nenhuma foto.
+    """
     concat_txt = os.path.join(temp_dir, "slideshow_list.txt")
     curr = 0.0
-    safety_target = target_duration + 35.0  # Garante que a trilha visual seja sempre mais longa que o áudio (-shortest corta com precisão)
+    safety_target = target_duration + 120.0  # Trilha visual mais longa que o áudio (-shortest corta com precisão)
     lines = []
     img_idx = 0
     
@@ -134,15 +139,14 @@ def build_slideshow_concat_script(images: list[str], target_duration: float, tem
     while curr < safety_target:
         img_path = img_pool[img_idx % len(img_pool)]
         lines.append(f"file '{img_path}'")
-        lines.append("duration 10.00")
-        curr += 10.0
+        lines.append("duration 6.00")
+        curr += 6.0
         img_idx += 1
-
-    lines.append(f"file '{img_pool[0]}'")
 
     with open(concat_txt, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     return concat_txt
+
 
 def render_movie_video(
     slug: str,
@@ -155,9 +159,8 @@ def render_movie_video(
 ) -> str:
     """
     Renderiza o vídeo final com alta performance em PASSADA ÚNICA (Single-Pass Filtergraph).
-    Combina o slideshow de fotos, a marca d'água animada .ass e o áudio em uma única codificação.
-    Aplica aceleração por hardware GPU (h264_nvenc) se disponível, caindo para libx264 se necessário.
-    Por fim, realiza o loop instantâneo (-c copy em 2 segundos) para preencher a duração do filme.
+    Combina o slideshow de fotos (6s por foto exatos), a marca d'água animada .ass e o áudio em uma única codificação.
+    Por fim, realiza o loop instantâneo (-c copy em segundos) para preencher a duração total do filme.
     """
     os.makedirs(output_dir, exist_ok=True)
     temp_dir = os.path.join(output_dir, "temp_render")
@@ -171,20 +174,20 @@ def render_movie_video(
     # 1. Duração do áudio da narração
     narration_duration = get_audio_duration(voiceover_path)
 
-    # 2. Gera o arquivo de concat das imagens para a duração da narração
+    # 2. Gera o arquivo de concat das imagens para a duração da narração (6s exatos por foto)
     concat_txt_path = build_slideshow_concat_script(images, narration_duration, temp_dir)
 
-    # 3. Gera a legenda animada .ass (DVD Bounce) com a fonte configurável
+    # 3. Gera a legenda animada .ass (DVD Bounce continuous 6s per step)
     generate_dvd_bounce_ass(ass_path, narration_duration + 10.0, font_name=watermark_font)
     ass_path_escaped = os.path.abspath(ass_path).replace("\\", "/").replace(":", "\\:")
 
-    # 4. Filtergraph Unificado (Redimensiona fotos + queima a legenda animada em PASSADA ÚNICA)
+    # 4. Filtergraph Unificado (Redimensiona fotos sem tela preta inicial + marca d'água em passada única)
     vf_combined = f"scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:black,fps=30,ass='{ass_path_escaped}'"
 
     vcodec = "libx264"
     preset = "ultrafast"
 
-    logging.info(f"🎨 PASSADA ÚNICA: Renderizando bloco do filme ({narration_duration:.1f}s = {narration_duration/60:.1f}min) com codec {vcodec} (preset {preset})...")
+    logging.info(f"🎨 PASSADA ÚNICA: Renderizando bloco do filme ({narration_duration:.1f}s = {narration_duration/60:.1f}min, 6s por foto) com codec {vcodec}...")
 
     cmd_single_pass = [
         "ffmpeg", "-y",
@@ -199,8 +202,7 @@ def render_movie_video(
     ]
     subprocess.run(cmd_single_pass, check=True)
 
-
-    # 6. Normalização da vinheta Intro (se existir)
+    # 5. Normalização da vinheta Intro (se existir)
     has_intro = False
     if intro_path and os.path.exists(intro_path):
         logging.info("Normalizando Vinheta Intro...")
@@ -217,7 +219,7 @@ def render_movie_video(
         except Exception as intro_err:
             logging.warning(f"Aviso ao normalizar vinheta intro: {intro_err}")
 
-    # 7. Loop Instantâneo via -c copy (executa em 2 segundos!) + corte exato com -t
+    # 6. Loop Instantâneo via -c copy + corte exato com -t
     target_sec = target_runtime_minutes * 60.0
     num_loops = math.ceil(target_sec / narration_duration)
     total_dur_min = target_runtime_minutes
