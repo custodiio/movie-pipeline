@@ -9,6 +9,4 @@ openai
 telethon
 cryptg
 psycopg2-binary
-gradio
-
-
+gradio>=5.12.0
