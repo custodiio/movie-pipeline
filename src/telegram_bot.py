@@ -115,16 +115,20 @@ class TelethonProgressTracker:
                     parse_mode="HTML"
                 )
             except Exception as e:
-                logging.warning(f"Tracker edit warning: {e}")
+                logging.debug(f"Tracker edit warning: {e}")
 
         try:
-            loop = self.context.application.loop
-            if loop and loop.is_running():
-                asyncio.run_coroutine_threadsafe(_do_edit(), loop)
-            else:
-                asyncio.create_task(_do_edit())
-        except Exception as err:
-            logging.error(f"Erro no agendamento do tracker: {err}")
+            loop = asyncio.get_running_loop()
+            loop.create_task(_do_edit())
+        except RuntimeError:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.run_coroutine_threadsafe(_do_edit(), loop)
+                else:
+                    loop.run_until_complete(_do_edit())
+            except Exception as err:
+                logging.debug(f"Erro no agendamento do tracker: {err}")
 
 
 class TorrentProgressTracker:
@@ -141,7 +145,7 @@ class TorrentProgressTracker:
     async def callback(self, info: dict):
         now = time.time()
         pct = info.get("percent", 0.0)
-        if now - self.last_update_time < 2.5 and pct < 100.0:
+        if now - self.last_update_time < 2.0 and pct < 100.0:
             return
         self.last_update_time = now
 
@@ -166,25 +170,15 @@ class TorrentProgressTracker:
             f"⏳ <b>Tempo Restante (ETA):</b> <code>{eta}</code>"
         )
 
-        async def _do_edit():
-            try:
-                await self.context.bot.edit_message_text(
-                    chat_id=self.chat_id,
-                    message_id=self.message_id,
-                    text=text,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logging.warning(f"Torrent progress edit warning: {e}")
-
         try:
-            loop = self.context.application.loop
-            if loop and loop.is_running():
-                asyncio.run_coroutine_threadsafe(_do_edit(), loop)
-            else:
-                asyncio.create_task(_do_edit())
-        except Exception as err:
-            logging.error(f"Erro agendamento progresso torrent: {err}")
+            await self.context.bot.edit_message_text(
+                chat_id=self.chat_id,
+                message_id=self.message_id,
+                text=text,
+                parse_mode="HTML"
+            )
+        except Exception as e:
+            logging.debug(f"Torrent progress edit warning: {e}")
 
 
 async def execute_torrent_to_vip_pipeline(
