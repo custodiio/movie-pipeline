@@ -80,6 +80,7 @@ class TelethonProgressTracker:
         self.action_title = action_title
         self.start_time = time.time()
         self.last_update_time = 0
+        self.last_text = ""
 
     def callback(self, current: int, total: int):
         now = time.time()
@@ -105,6 +106,10 @@ class TelethonProgressTracker:
             f"📦 <b>Tamanho:</b> <code>{curr_mb:.1f} MB / {tot_mb:.1f} MB</code>\n"
             f"🚀 <b>Velocidade:</b> <code>{speed_mb:.2f} MB/s</code>"
         )
+
+        if text == self.last_text:
+            return
+        self.last_text = text
 
         async def _do_edit():
             try:
@@ -141,6 +146,7 @@ class TorrentProgressTracker:
         self.message_id = message_id
         self.torrent_title = torrent_title
         self.last_update_time = 0
+        self.last_text = ""
 
     async def callback(self, info: dict):
         now = time.time()
@@ -169,6 +175,10 @@ class TorrentProgressTracker:
             f"👥 <b>Conexões:</b> <code>{conns} peers ({seeds} sementes)</code>\n"
             f"⏳ <b>Tempo Restante (ETA):</b> <code>{eta}</code>"
         )
+
+        if text == self.last_text:
+            return
+        self.last_text = text
 
         try:
             await self.context.bot.edit_message_text(
@@ -1008,12 +1018,20 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
 
     # Se for um link magnet recebido no menu VIP
     if torrent_magnet:
-        await execute_torrent_to_vip_pipeline(
-            context=context,
+        asyncio.create_task(
+            execute_torrent_to_vip_pipeline(
+                context=context,
+                chat_id=query.message.chat_id,
+                message_id=query.message.message_id,
+                magnet_link=torrent_magnet,
+                caption=caption
+            )
+        )
+        await context.bot.send_message(
             chat_id=query.message.chat_id,
-            message_id=query.message.message_id,
-            magnet_link=torrent_magnet,
-            caption=caption
+            text="⚡ <i>Download e postagem iniciados em segundo plano! O bot está 100% livre para você acionar outras funções.</i>",
+            reply_markup=get_main_keyboard(),
+            parse_mode="HTML"
         )
         return ConversationHandler.END
 
@@ -1319,7 +1337,7 @@ async def handle_edit_torrent_title_receive(update: Update, context: ContextType
     return STATE_TORRENT_CONFIRM_TITLE
 
 async def handle_execute_torrent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Acionado pelo botão inline para iniciar o download e upload do torrent."""
+    """Acionado pelo botão inline para iniciar o download e upload do torrent em segundo plano."""
     query = update.callback_query
     await query.answer()
 
@@ -1330,12 +1348,22 @@ async def handle_execute_torrent_callback(update: Update, context: ContextTypes.
         await query.edit_message_text("❌ Nenhum magnet link foi fornecido.", parse_mode="Markdown")
         return ConversationHandler.END
 
-    await execute_torrent_to_vip_pipeline(
-        context=context,
+    # Dispara a tarefa em segundo plano e libera a conversa/bot imediatamente para múltiplas ações concorrentes
+    asyncio.create_task(
+        execute_torrent_to_vip_pipeline(
+            context=context,
+            chat_id=query.message.chat_id,
+            message_id=query.message.message_id,
+            magnet_link=magnet_link,
+            caption=caption
+        )
+    )
+
+    await context.bot.send_message(
         chat_id=query.message.chat_id,
-        message_id=query.message.message_id,
-        magnet_link=magnet_link,
-        caption=caption
+        text="⚡ <i>Download e postagem iniciados em segundo plano! O bot está 100% livre para você acionar outras funções.</i>",
+        reply_markup=get_main_keyboard(),
+        parse_mode="HTML"
     )
     return ConversationHandler.END
 
@@ -2050,7 +2078,7 @@ def create_telegram_bot_app() -> Application:
     if not TELEGRAM_BOT_TOKEN:
         raise ValueError("TELEGRAM_BOT_TOKEN não está configurado no .env!")
 
-    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).concurrent_updates(True).build()
 
     # ConversationHandler para Produzir Filme no Pipeline
     conv_produce_movie = ConversationHandler(
