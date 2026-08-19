@@ -49,11 +49,10 @@ Tabela `movies`:
 - **`src/omni_tts.py`**:
   - Módulo de síntese de voz paralela em 2 blocos utilizando os servidores OmniVoice (`http://127.0.0.1:8001/` e `http://127.0.0.1:8002/`) com o áudio de clonagem de referência em `Assets/Clonagem/`.
 - **`src/video_editor.py`**:
-  - Renderizador de vídeo no FFmpeg com aceleração por hardware GPU Nvidia NVENC (`h264_nvenc`) a 250+ FPS ou CPU ultra-rápida.
-  - Concatenação com a vinheta oficial `intro.mp4`.
-  - Slideshow ultra-estável com cada imagem durando EXATAMENTE 10.00s em loop contínuo sobre o conjunto de fotos (`foto1, foto2, ..., fotoN, foto1, foto2...`) até cobrir a duração total da narração.
-  - Marca d'água animada estilo DVD bounce com `\move` ASS legível, gigante (65pt) com movimento sincronizado em travessias de 10s.
-  - Renderização otimizada em Passada Única + Loop Instantâneo: Concatena slideshow de fotos + queima a legenda ASS 65pt animada (DVD bounce `\move`) + áudio da narração em 1 única passada FFmpeg com `fps=30` antes do `ass=` para interpolar a animação `\move`. Por fim, concatena vinheta intro + repetições do bloco queimado via stream copy `-c copy` instantâneo.
+  - Pré-padronização ultra-rápida de 100% das imagens via Pillow para Full HD 1920x1080 com ajuste de proporção elegante e centralização sobre fundo preto (zero tela preta, zero distorção para 16:9, 4:3 e 1:1).
+  - Renderização do Bloco Visual Base com cada foto durando EXATAMENTE 5.00s e queima da marca d'água DVD bounce sincronizada em travessias de 5.0s sem congelamentos.
+  - Multiplicação e mesclagem com a narração de áudio via Stream Copy instantâneo (`-c:v copy -c:a aac`) com corte preciso via `-shortest`.
+  - Normalização da vinheta intro oficial e loop instantâneo final (`-c copy`) em segundos para cobrir a duração total do filme (110 min).
   - Salva em `output/<slug>.mp4`.
 
 
