@@ -28,10 +28,10 @@ _token_expires_at = 0.0
 
 
 def get_dailymotion_credentials() -> tuple[str, str]:
-    """Recupera client_id e client_secret do arquivo .env com fallbacks."""
+    """Recupera client_id e client_secret do arquivo .env com sanitização."""
     client_id = os.getenv("DAILYMOTION_CLIENT_ID") or os.getenv("DAILYMOTION_API_KEY", "")
     client_secret = os.getenv("DAILYMOTION_CLIENT_SECRET") or os.getenv("DAILYMOTION_API_SECRET", "")
-    return client_id.strip(), client_secret.strip()
+    return client_id.strip().strip("\"'").strip(), client_secret.strip().strip("\"'").strip()
 
 
 def get_dailymotion_access_token(force_refresh: bool = False) -> str:
@@ -46,20 +46,23 @@ def get_dailymotion_access_token(force_refresh: bool = False) -> str:
         return _cached_token
 
     client_id, client_secret = get_dailymotion_credentials()
-    if not (client_id and client_secret):
-        raise ValueError("Credenciais DAILYMOTION_CLIENT_ID e DAILYMOTION_CLIENT_SECRET não configuradas no .env!")
+    if not client_id or not client_secret:
+        raise ValueError("Credenciais do Dailymotion (DAILYMOTION_CLIENT_ID / DAILYMOTION_CLIENT_SECRET) não configuradas.")
+
+    payload = {
+        "grant_type": "client_credentials",
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "scope": "video.manage"
+    }
 
     with httpx.Client(timeout=20) as client:
         res = client.post(
             DM_TOKEN_URL,
-            data={
-                "grant_type": "client_credentials",
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "scope": "video.manage"
-            },
+            data=payload,
             headers={"Content-Type": "application/x-www-form-urlencoded"}
         )
+
         if res.status_code != 200:
             raise RuntimeError(f"Erro na autenticação Dailymotion ({res.status_code}): {res.text}")
 
@@ -87,7 +90,10 @@ def create_upload_session(token: str) -> dict:
 
 
 class ProgressFileReader:
-    """Wrapper de arquivo com callback de progresso por chunks para o upload."""
+    """
+    Wrapper de arquivo com callback de progresso por chunks para o upload.
+    Implementa seek, tell e __len__ para garantir que o cliente HTTP envie o cabeçalho Content-Length correto.
+    """
     def __init__(self, file_path: str, progress_callback: Optional[Callable[[float, int, int], None]] = None, chunk_size: int = 1024 * 1024):
         self.file_path = file_path
         self.total_bytes = os.path.getsize(file_path)
@@ -107,6 +113,17 @@ class ProgressFileReader:
                 except Exception as e:
                     logging.debug(f"Erro no progress_callback: {e}")
         return chunk
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        res = self._file.seek(offset, whence)
+        self.read_bytes = self._file.tell()
+        return res
+
+    def tell(self) -> int:
+        return self._file.tell()
+
+    def __len__(self) -> int:
+        return self.total_bytes
 
     def close(self):
         self._file.close()
