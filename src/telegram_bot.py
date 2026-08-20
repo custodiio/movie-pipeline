@@ -260,10 +260,43 @@ async def execute_torrent_to_vip_pipeline(
     # 3. Seleciona o vídeo principal (maior arquivo de vídeo)
     main_video = videos[0]
 
-    # 3.1 Embuti legenda externa/manual ou detectada na pasta e otimiza para streaming (+faststart)
-    sub_to_use = subtitle_path or context.user_data.get("custom_subtitle_path") if hasattr(context, "user_data") else subtitle_path
+    # 3.1 Gravação de Legenda (Hardsub compatível 100% iOS/Desktop/Android) e Otimização de Stream (+faststart)
+    sub_to_use = subtitle_path or (context.user_data.get("custom_subtitle_path") if hasattr(context, "user_data") and context.user_data else None)
+    
+    def _sub_status_cb(msg_str, pct):
+        async def _do():
+            try:
+                if pct is not None:
+                    filled = int(pct / 10)
+                    bar = "█" * filled + "░" * (10 - filled)
+                    txt = (
+                        f"🔥 <b>GRAVANDO LEGENDA NO VÍDEO (100% COMPATÍVEL)...</b>\n\n"
+                        f"🎬 <b>Filme:</b> <code>{display_title}</code>\n"
+                        f"📊 <b>Progresso:</b> <code>[{bar}] {pct:.1f}%</code>\n"
+                        f"📱 <i>Formatando para exibição automática em iPhone, iPad, PC e Android...</i>"
+                    )
+                else:
+                    txt = (
+                        f"🔥 <b>PROCESSANDO LEGENDA NO VÍDEO...</b>\n\n"
+                        f"🎬 <b>Filme:</b> <code>{display_title}</code>\n"
+                        f"ℹ️ <i>{msg_str}</i>"
+                    )
+                await context.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=txt, parse_mode="HTML")
+            except Exception:
+                pass
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_do())
+        except Exception:
+            pass
+
     try:
-        main_video, is_temp_remux = await embed_subtitles_and_prepare_stream(main_video, sub_to_use)
+        main_video, is_temp_remux = await embed_subtitles_and_prepare_stream(
+            main_video,
+            sub_to_use,
+            burn_subtitles=True,
+            status_callback=_sub_status_cb
+        )
     except Exception as sub_err:
         logging.warning(f"Aviso ao preparar legenda/streaming no torrent: {sub_err}")
 
@@ -274,7 +307,7 @@ async def execute_torrent_to_vip_pipeline(
         await context.bot.edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
-            text=f"🎬 <b>Download concluído! ({file_size_mb:.1f} MB)</b>\n\n⚙️ <i>Analisando arquivo e dividindo se ultrapassar o limite do Telegram...</i>",
+            text=f"🎬 <b>Vídeo pronto para o Telegram! ({file_size_mb:.1f} MB)</b>\n\n⚙️ <i>Analisando arquivo e dividindo se ultrapassar o limite do Telegram...</i>",
             parse_mode="HTML"
         )
     except Exception:
@@ -1186,10 +1219,37 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                         downloaded_path = await client.download_media(orig_msg, file=temp_dir, progress_callback=tracker_down.callback)
 
                         if downloaded_path and os.path.exists(downloaded_path):
-                            # Embuti legenda se fornecida
+                            def _vip_sub_cb(msg_str, pct):
+                                async def _do():
+                                    try:
+                                        if pct is not None:
+                                            filled = int(pct / 10)
+                                            bar = "█" * filled + "░" * (10 - filled)
+                                            txt = (
+                                                f"🔥 <b>GRAVANDO LEGENDA NO VÍDEO (100% COMPATÍVEL)...</b>\n\n"
+                                                f"📊 <b>Progresso:</b> <code>[{bar}] {pct:.1f}%</code>\n"
+                                                f"📱 <i>Formatando para exibição automática em iPhone, iPad, PC e Android...</i>"
+                                            )
+                                        else:
+                                            txt = f"🔥 <b>PROCESSANDO LEGENDA NO VÍDEO...</b>\n\nℹ️ <i>{msg_str}</i>"
+                                        await query.edit_message_text(txt, parse_mode="HTML")
+                                    except Exception:
+                                        pass
+                                try:
+                                    loop = asyncio.get_running_loop()
+                                    loop.create_task(_do())
+                                except Exception:
+                                    pass
+
+                            # Embuti/grava legenda se fornecida
                             if custom_sub and os.path.exists(custom_sub):
-                                logging.info(f"⚡ Embutindo legenda manual no vídeo do canal protegido: {custom_sub}")
-                                downloaded_path, _ = await embed_subtitles_and_prepare_stream(downloaded_path, custom_sub)
+                                logging.info(f"⚡ Gravando legenda manual no vídeo do canal protegido: {custom_sub}")
+                                downloaded_path, _ = await embed_subtitles_and_prepare_stream(
+                                    downloaded_path,
+                                    custom_sub,
+                                    burn_subtitles=True,
+                                    status_callback=_vip_sub_cb
+                                )
                             elif downloaded_path.lower().endswith(".mkv"):
                                 downloaded_path, _ = await embed_subtitles_and_prepare_stream(downloaded_path, None)
 

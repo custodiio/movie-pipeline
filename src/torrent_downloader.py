@@ -234,15 +234,20 @@ def find_subtitle_files(directory: str) -> List[str]:
     return sub_files
 
 
-async def embed_subtitles_and_prepare_stream(video_path: str, subtitle_path: Optional[str] = None) -> tuple[str, bool]:
+async def embed_subtitles_and_prepare_stream(
+    video_path: str,
+    subtitle_path: Optional[str] = None,
+    burn_subtitles: bool = True,
+    status_callback: Optional[Callable[[str, Optional[float]], None]] = None
+) -> tuple[str, bool]:
     """
-    Embuti legenda (softsub) no vídeo e garante contêiner MP4 otimizado para streaming instantâneo
-    no player do Telegram (+faststart).
+    Prepara o vídeo para reprodução perfeita com legendas em 100% dos dispositivos Telegram (iOS, Desktop, Android e Web):
     
-    1. Preserva 100% das faixas de áudio originais (multi-áudio intacto).
-    2. Insere a legenda externa como faixa selecionável nativa (mov_text) em ~2-3 segundos com -c copy.
-    3. Se não houver legenda externa mas o diretório tiver arquivos .srt, detecta e insere automaticamente.
-    4. Aplica -movflags +faststart para início instantâneo de streaming.
+    1. Se houver legenda informada (ou na pasta) e burn_subtitles=True:
+       Executa Hardsub de alta velocidade via FFmpeg (-preset veryfast -c:a copy) gravando as legendas
+       com estilo elegante (letras brancas, contorno preto) para exibição imediata no player nativo do Telegram.
+    2. Preserva 100% das faixas de áudio originais.
+    3. Aplica -movflags +faststart para streaming instantâneo.
     
     Retorna (caminho_final, is_temporario).
     """
@@ -259,11 +264,68 @@ async def embed_subtitles_and_prepare_stream(video_path: str, subtitle_path: Opt
             logging.info(f"📝 Legenda detectada automaticamente na pasta: {sub_file}")
 
     base_name, ext = os.path.splitext(video_path)
-    output_path = f"{base_name}_telegram.mp4"
+    output_path = f"{base_name}_vip_stream.mp4"
 
     if sub_file and os.path.exists(sub_file):
-        logging.info(f"⚡ Embutindo legenda '{os.path.basename(sub_file)}' no vídeo via FFmpeg Stream Copy...")
-        cmd = [
+        if burn_subtitles:
+            logging.info(f"🔥 Queimando legenda '{os.path.basename(sub_file)}' no vídeo (100% compatível iOS/Desktop)...")
+            if status_callback:
+                status_callback(f"🔥 Gravando legenda no vídeo (compatível com iPhone, iPad, PC e Android)...", 0.0)
+
+            # Escapa o caminho para o filtro subtitles do ffmpeg
+            sub_escaped = os.path.abspath(sub_file).replace("\\", "/").replace(":", "\\:")
+            filter_str = f"subtitles='{sub_escaped}':force_style='FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=3,Outline=1.5,MarginV=25'"
+
+            # Obtém a duração aproximada para o cálculo de progresso
+            meta = await extract_video_metadata_and_thumb(video_path)
+            total_dur = meta.get("duration", 1) or 1
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", video_path,
+                "-vf", filter_str,
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "21",
+                "-c:a", "copy",
+                "-movflags", "+faststart",
+                "-progress", "pipe:1",
+                "-nostats",
+                output_path
+            ]
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.DEVNULL
+                )
+                last_cb = 0.0
+                while True:
+                    line_bytes = await proc.stdout.readline()
+                    if not line_bytes:
+                        break
+                    line = line_bytes.decode("utf-8", errors="replace").strip()
+                    if line.startswith("out_time_us="):
+                        try:
+                            us = int(line.split("=")[1])
+                            sec = us / 1_000_000
+                            pct = min(100.0, (sec / total_dur) * 100)
+                            now = asyncio.get_event_loop().time()
+                            if (now - last_cb >= 2.5 or pct >= 100.0) and status_callback:
+                                last_cb = now
+                                status_callback(f"🔥 Gravando legenda no vídeo ({pct:.1f}%)...", pct)
+                        except Exception:
+                            pass
+                await proc.wait()
+
+                if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                    logging.info(f"✅ Vídeo com legenda gravada gerado com sucesso: {output_path}")
+                    return output_path, True
+            except Exception as e:
+                logging.warning(f"Aviso ao queimar legenda com FFmpeg: {e}. Tentando fallback softsub...")
+
+        # Fallback para Softsub rápido se burn_subtitles=False ou se falhar
+        cmd_soft = [
             "ffmpeg", "-y",
             "-i", video_path,
             "-i", sub_file,
@@ -279,15 +341,14 @@ async def embed_subtitles_and_prepare_stream(video_path: str, subtitle_path: Opt
             output_path
         ]
         try:
-            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-            await proc.communicate()
-            if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-                logging.info(f"✅ Vídeo com legenda e streaming gerado com sucesso: {output_path}")
+            proc_soft = await asyncio.create_subprocess_exec(*cmd_soft, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await proc_soft.communicate()
+            if proc_soft.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
                 return output_path, True
-        except Exception as e:
-            logging.warning(f"Aviso ao embutir legenda no MP4: {e}. Mantendo arquivo original.")
+        except Exception:
+            pass
 
-    # Se for MKV com legendas embutidas ou sem legenda externa, converte para MP4 preservando tudo
+    # Se for MKV sem legenda externa, converte para MP4 preservando tudo
     elif ext.lower() == ".mkv":
         logging.info(f"⚡ Remuxando MKV para MP4 com suporte a streaming (+faststart)...")
         cmd = [
