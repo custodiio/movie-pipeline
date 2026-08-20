@@ -42,6 +42,8 @@ from src.kaggle_trigger import trigger_kaggle_notebook
 from src.database import is_movie_posted, update_movie_status
 from src.thumbnail_generator import get_movie_images_tmdb, compose_thumbnail
 from src.post_guide_generator import generate_youtube_post_guide, save_post_guide_to_file
+from src.youtube_uploader import upload_video_to_youtube
+from src.dailymotion_uploader import upload_video_to_dailymotion
 from src.torrent_downloader import (
     download_torrent_magnet,
     split_video_if_needed,
@@ -427,7 +429,7 @@ STATE_RECEIVE_VIDEO, STATE_CONFIRM_VIDEO_TITLE, STATE_EDIT_VIP_TITLE = range(6, 
 # Estados da Conversa para Produzir Filme no Pipeline
 STATE_PRODUCE_CONFIRM, STATE_PRODUCE_INPUT_TITLE, STATE_PRODUCE_SELECT_MOVIE = range(9, 12)
 
-# Estados da Conversa para Thumbnail, Guia de Postagem, Upload do YouTube e Baixar Torrent VIP
+# Estados da Conversa para Thumbnail, Guia, YouTube, Dailymotion, Simultâneo e Torrent VIP
 (
     STATE_THUMB_START,
     STATE_THUMB_INPUT_MANUAL,
@@ -443,10 +445,14 @@ STATE_PRODUCE_CONFIRM, STATE_PRODUCE_INPUT_TITLE, STATE_PRODUCE_SELECT_MOVIE = r
     STATE_GUIDE_SELECT_MOVIE,
     STATE_YT_SELECT_MOVIE,
     STATE_YT_CONFIRM_UPLOAD,
+    STATE_DM_SELECT_MOVIE,
+    STATE_DM_CONFIRM_UPLOAD,
+    STATE_SIMUL_SELECT_MOVIE,
+    STATE_SIMUL_CONFIRM_UPLOAD,
     STATE_TORRENT_INPUT,
     STATE_TORRENT_CONFIRM_TITLE,
     STATE_TORRENT_EDIT_TITLE
-) = range(12, 29)
+) = range(12, 33)
 
 
 
@@ -455,7 +461,8 @@ def get_main_keyboard():
     reply_keyboard = [
         ["🎬 Produzir Filme (Pipeline)"],
         ["🖼️ Criar Thumbnail (Capa 16:9)", "📝 Gerar Guia de Postagem (IA)"],
-        ["📺 Postar no YouTube (Privado)"],
+        ["📺 Postar no YouTube (Privado)", "🌐 Postar no Dailymotion"],
+        ["🚀 Postar Simultâneo (YT + DM)"],
         ["📢 Criar Postagem de Venda", "🎥 Postar Vídeo no VIP"],
         ["🧲 Baixar Torrent p/ VIP", "ℹ️ Status dos Canais"],
         ["❓ Ajuda"]
@@ -478,9 +485,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "1. **🎬 Produzir Filme (Pipeline)** (`/produzir`): Pesquisa o filme em alta no TMDB que ainda não foi postado (ou permite digitar manualmente), limpa os arquivos e aciona a GPU Tesla T4 no Kaggle.\n\n"
         "2. **🖼️ Criar Thumbnail** (`/thumb` ou `/capa`): Aciona APENAS a criação da capa 16:9 HD (Backdrops TMDB ou Imagem Manual + Logo Oficial + Grid 9 Posições) sem rodar o pipeline.\n\n"
         "3. **📝 Gerar Guia de Postagem** (`/guia`): Aciona APENAS a geração do Guia do YouTube via IA (Título SEO, Descrição Adaptada, Hashtags, Disclaimer e Tags) sem rodar o pipeline.\n\n"
-        "4. **📢 Criar Postagem de Venda** (`/postar`): Busca o filme no TMDB, gera a copy persuasiva via IA e publica no canal público.\n\n"
-        "5. **🎥 Postar Vídeo no VIP** (`/postar_video`): Envia vídeos de qualquer tamanho (com corte automático para > 2GB) para o canal VIP.\n\n"
-        "6. **🧲 Baixar Torrent p/ VIP** (`/torrent` ou `/magnet`): Baixa filmes via Magnet Torrent em velocidade máxima saturando a instância com Aria2c + Trackers, divide automaticamente se for maior que 2GB/4GB e publica no canal VIP com status em tempo real.",
+        "4. **📺 Postar no YouTube** (`/postar_youtube` ou `/youtube`): Publica o vídeo MP4 + Capa + SEO diretamente no YouTube em modo Privado.\n\n"
+        "5. **🌐 Postar no Dailymotion** (`/postar_dailymotion` ou `/dailymotion` ou `/dm`): Publica o vídeo com streaming de alta velocidade diretamente no seu canal do Dailymotion.\n\n"
+        "6. **🚀 Postar Simultâneo (YT + DM)** (`/postar_simultaneo` ou `/simultaneo`): Realiza o upload simultâneo em paralelo para o YouTube e o Dailymotion com barra de progresso em tempo real.\n\n"
+        "7. **📢 Criar Postagem de Venda** (`/postar`): Busca o filme no TMDB, gera a copy persuasiva via IA e publica no canal público.\n\n"
+        "8. **🎥 Postar Vídeo no VIP** (`/postar_video`): Envia vídeos de qualquer tamanho (com corte automático para > 2GB) para o canal VIP.\n\n"
+        "9. **🧲 Baixar Torrent p/ VIP** (`/torrent` ou `/magnet`): Baixa filmes via Magnet Torrent em velocidade máxima com Aria2c, divide se > 2GB/4GB e publica no canal VIP com streaming player.",
         reply_markup=get_main_keyboard(),
         parse_mode="Markdown"
     )
@@ -2310,6 +2320,56 @@ def create_telegram_bot_app() -> Application:
         per_message=False
     )
 
+    # ConversationHandler para Postar no Dailymotion
+    conv_post_dailymotion = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex(r"^🌐 Postar no Dailymotion$"), initiate_dailymotion_upload_standalone),
+            CommandHandler("postar_dailymotion", initiate_dailymotion_upload_standalone),
+            CommandHandler("dailymotion", initiate_dailymotion_upload_standalone),
+            CommandHandler("dm", initiate_dailymotion_upload_standalone)
+        ],
+        states={
+            STATE_DM_SELECT_MOVIE: [
+                CallbackQueryHandler(handle_dailymotion_select_movie_callback, pattern="^(dm_sel_m_id:.*|cancel_post)$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_dailymotion_select_movie_callback)
+            ],
+            STATE_DM_CONFIRM_UPLOAD: [
+                CallbackQueryHandler(handle_dailymotion_execute_upload_callback, pattern="^(exec_dm_upload|cancel_post)$")
+            ]
+        },
+        fallbacks=[
+            CommandHandler("cancel", lambda u, c: ConversationHandler.END),
+            CommandHandler("start", start_command)
+        ],
+        allow_reentry=True,
+        per_message=False
+    )
+
+    # ConversationHandler para Postagem Simultânea (YouTube + Dailymotion)
+    conv_post_simul = ConversationHandler(
+        entry_points=[
+            MessageHandler(filters.Regex(r"^🚀 Postar Simultâneo \(YT \+ DM\)$"), initiate_simultaneous_upload_standalone),
+            CommandHandler("postar_simultaneo", initiate_simultaneous_upload_standalone),
+            CommandHandler("simultaneo", initiate_simultaneous_upload_standalone),
+            CommandHandler("yt_dm", initiate_simultaneous_upload_standalone)
+        ],
+        states={
+            STATE_SIMUL_SELECT_MOVIE: [
+                CallbackQueryHandler(handle_simultaneous_select_movie_callback, pattern="^(simul_sel_m_id:.*|cancel_post)$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, handle_simultaneous_select_movie_callback)
+            ],
+            STATE_SIMUL_CONFIRM_UPLOAD: [
+                CallbackQueryHandler(handle_simultaneous_execute_upload_callback, pattern="^(exec_simul_upload|cancel_post)$")
+            ]
+        },
+        fallbacks=[
+            CommandHandler("cancel", lambda u, c: ConversationHandler.END),
+            CommandHandler("start", start_command)
+        ],
+        allow_reentry=True,
+        per_message=False
+    )
+
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("ajuda", help_command))
     app.add_handler(CommandHandler("status", status_command))
@@ -2320,6 +2380,8 @@ def create_telegram_bot_app() -> Application:
 
     app.add_handler(conv_torrent_vip)
     app.add_handler(conv_post_youtube)
+    app.add_handler(conv_post_dailymotion)
+    app.add_handler(conv_post_simul)
     app.add_handler(conv_produce_movie)
     app.add_handler(conv_thumb_only)
 
@@ -2330,19 +2392,18 @@ def create_telegram_bot_app() -> Application:
     return app
 
 
-
-
 if __name__ == "__main__":
     print("🤖 Iniciando Bot do Telegram Movie-Pipeline...")
     application = create_telegram_bot_app()
     application.run_polling()
 
+
 # ==============================================================================
-# FLUXO STANDALONE: POSTAGEM AUTOMÁTICA NO YOUTUBE (PRIVADO)
+# HELPER COMPARTILHADO: PREPARAÇÃO DE ASSETS PARA UPLOAD (DRY)
 # ==============================================================================
 
-async def initiate_youtube_upload_standalone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Inicia o fluxo de postagem automática no YouTube no modo Privado."""
+async def _fetch_recent_movies_for_upload():
+    """Busca filmes recentes prontos para upload no banco de dados SQLite / PostgreSQL."""
     from src.database import DATABASE_URL, _get_pg_conn, _get_sqlite_conn
     movies = []
     try:
@@ -2361,241 +2422,19 @@ async def initiate_youtube_upload_standalone(update: Update, context: ContextTyp
             cursor.close()
             conn.close()
     except Exception as e:
-        logging.error(f"Erro no banco de dados: {e}")
+        logging.error(f"Erro no banco de dados ao buscar filmes para upload: {e}")
+    return movies
 
 
-    text = (
-        "📺 <b>PUBLICADOR AUTOMÁTICO DO YOUTUBE (PRIVADO)</b>\n\n"
-        "O robô enviará o vídeo MP4, a Thumbnail 16:9, Título SEO, Descrição Completa e Tags diretamente para o seu Canal do YouTube no modo <b>Privado</b>!\n\n"
-        "Selecione um dos filmes concluídos abaixo ou <b>digite o nome do filme</b> no chat:"
-    )
-
-    keyboard = []
-    for m in movies:
-        keyboard.append([InlineKeyboardButton(f"🎬 {m[1]} ({m[2].upper()})", callback_data=f"yt_sel_m_id:{m[0]}")])
-    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
-
-    markup = InlineKeyboardMarkup(keyboard)
-
-    if update.message:
-        await update.message.reply_text(text, reply_markup=markup, parse_mode="HTML")
-    elif update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
-
-    return STATE_YT_SELECT_MOVIE
-
-
-async def handle_youtube_select_movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if query:
-        await query.answer()
-        data = query.data
-        if data == "cancel_post":
-            await query.edit_message_text("❌ Operação cancelada.")
-            return ConversationHandler.END
-
-        tmdb_id = int(data.split(":")[1])
-        movie_info = get_movie_details(tmdb_id, language="pt-BR")
-    else:
-        user_text = update.message.text.strip()
-        msg_wait = await update.message.reply_text(f"🔍 Buscando '{user_text}' no TMDB...")
-        results = search_movies(user_text, language="pt-BR")
-        if not results:
-            await msg_wait.edit_text("❌ Nenhum filme encontrado. Digite outro nome:")
-            return STATE_YT_SELECT_MOVIE
-        movie_info = get_movie_details(results[0]["id"], language="pt-BR")
-
-    title_clean = movie_info.get("title", "")
-    slug = movie_info.get("slug") or movie_info.get("original_title", "").lower().replace(" ", "_")
-    context.user_data["yt_movie_info"] = movie_info
-    context.user_data["yt_slug"] = slug
-
-    # Prepara o Guia de Postagem
-    guide_data = generate_youtube_post_guide(movie_info)
-    context.user_data["yt_guide"] = guide_data
-
-    # Localiza o vídeo MP4 local ou faz download do Drive
-    video_path = f"output/{slug}.mp4"
-    if not os.path.exists(video_path):
-        os.makedirs(f"temp/{slug}", exist_ok=True)
-        drive = get_drive_service()
-        if drive:
-            drive_file = baixar_do_drive(drive, f"Movie-Pipeline/Projetos/{slug}/{slug}.mp4", f"temp/{slug}/{slug}.mp4")
-            if drive_file and os.path.exists(drive_file):
-                video_path = drive_file
-
-    context.user_data["yt_video_path"] = video_path
-
-    # Localiza a thumbnail PNG
-    thumb_path = f"temp/{slug}/thumbnail.png"
-    if not os.path.exists(thumb_path):
-        drive = get_drive_service()
-        if drive:
-            d_thumb = baixar_do_drive(drive, f"Movie-Pipeline/Projetos/{slug}/thumbnail.png", f"temp/{slug}/thumbnail.png")
-            if d_thumb and os.path.exists(d_thumb):
-                thumb_path = d_thumb
-
-    context.user_data["yt_thumb_path"] = thumb_path if os.path.exists(thumb_path) else None
-
-    has_video = os.path.exists(video_path)
-    preview_msg = (
-        f"📺 <b>PRÉVIA DA POSTAGEM NO YOUTUBE (PRIVADO)</b>\n\n"
-        f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
-        f"📌 <b>Título SEO:</b>\n<code>{guide_data['youtube_title']}</code>\n\n"
-        f"📄 <b>Descrição:</b>\n<code>{guide_data['description'][:300]}...</code>\n\n"
-        f"🏷️ <b>Tags:</b> <code>{guide_data['tags'][:100]}...</code>\n\n"
-        f"📁 <b>Vídeo MP4:</b> <code>{os.path.basename(video_path)}</code> ({'✅ Encontrado' if has_video else '⚠️ Não localizador (usará teste)'})\n"
-        f"🖼️ <b>Thumbnail 16:9:</b> {'✅ Presente' if context.user_data['yt_thumb_path'] else '⚠️ Ausente'}\n\n"
-        f"Clique no botão abaixo para publicar agora no YouTube em modo <b>PRIVADO</b>:"
-    )
-
-    keyboard = [
-        [InlineKeyboardButton("🚀 Confirmar Upload no YouTube (Privado)", callback_data="exec_yt_upload")],
-        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
-    ]
-
-    target = query.message if query else update.message
-    if context.user_data.get("yt_thumb_path"):
-        with open(context.user_data["yt_thumb_path"], "rb") as pf:
-            await target.reply_photo(photo=pf, caption=preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-    else:
-        await target.reply_text(preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-
-    return STATE_YT_CONFIRM_UPLOAD
-
-
-async def handle_youtube_execute_upload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data
-    if data == "cancel_post":
-        await query.edit_message_text("❌ Publicação no YouTube cancelada.")
-        return ConversationHandler.END
-
-    movie_info = context.user_data.get("yt_movie_info", {})
-    guide = context.user_data.get("yt_guide", {})
-    video_path = context.user_data.get("yt_video_path", "")
-    thumb_path = context.user_data.get("yt_thumb_path")
-
-    await query.edit_message_text("⏳ <b>Fazendo upload do vídeo e thumbnail para o YouTube (Privado)... Por favor, aguarde.</b>", parse_mode="HTML")
-
-    from src.youtube_uploader import upload_video_to_youtube
-    from src.database import mark_as_posted
-
-    res = upload_video_to_youtube(
-        video_path=video_path,
-        title=guide.get("youtube_title", movie_info.get("title", "Vídeo")),
-        description=guide.get("description", ""),
-        tags=guide.get("tags", ""),
-        thumbnail_path=thumb_path,
-        privacy_status="private"
-    )
-
-    if res.get("success"):
-        tmdb_id = movie_info.get("id") or movie_info.get("tmdb_id")
-        if tmdb_id:
-            mark_as_posted(tmdb_id)
-
-        # Exclusão automática de arquivos de mídia temporários da instância após postagem com sucesso
-        try:
-            limpar_arquivos_locais_temporarios(["temp", "output", "temp_vip_downloads"])
-            logging.info("🧹 Arquivos de mídia temporários excluídos da instância com sucesso.")
-        except Exception as e_clean:
-            logging.warning(f"Aviso ao limpar mídias da instância: {e_clean}")
-
-        msg_success = (
-            f"🎉 <b>VÍDEO PUBLICADO NO YOUTUBE COM SUCESSO!</b>\n\n"
-            f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
-            f"🔒 <b>Privacidade:</b> Privado (Draft)\n"
-            f"🔗 <b>Link no YouTube:</b> {res.get('video_url')}\n\n"
-            f"✅ Status do filme alterado para <code>posted</code> no banco de dados e arquivos locais temporários excluídos da instância!"
-        )
-        await query.message.reply_text(msg_success, parse_mode="HTML")
-    else:
-        err = res.get("error", "Erro desconhecido")
-        await query.message.reply_text(f"❌ <b>Falha no upload para o YouTube:</b>\n<code>{err}</code>", parse_mode="HTML")
-
-    return ConversationHandler.END
-
-
-
-
-
-# ==============================================================================
-# FLUXO STANDALONE: POSTAGEM AUTOMÁTICA NO YOUTUBE (PRIVADO)
-# ==============================================================================
-
-async def initiate_youtube_upload_standalone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Inicia o fluxo de postagem automática no YouTube no modo Privado."""
-    from src.database import DATABASE_URL, _get_pg_conn, _get_sqlite_conn
-    movies = []
-    try:
-        if DATABASE_URL:
-            conn = _get_pg_conn()
-            cursor = conn.cursor()
-            cursor.execute("SELECT tmdb_id, title, status FROM movie_pipeline_movies WHERE status IN ('concluido', 'selected', 'pending') ORDER BY tmdb_id DESC LIMIT 5")
-            movies = cursor.fetchall()
-            cursor.close()
-            conn.close()
-        else:
-            conn = _get_sqlite_conn()
-            cursor = conn.cursor()
-            cursor.execute("SELECT tmdb_id, title, status FROM movies WHERE status IN ('concluido', 'selected', 'pending') ORDER BY tmdb_id DESC LIMIT 5")
-            movies = cursor.fetchall()
-            cursor.close()
-            conn.close()
-    except Exception as e:
-        logging.error(f"Erro no banco de dados: {e}")
-
-
-    text = (
-        "📺 <b>PUBLICADOR AUTOMÁTICO DO YOUTUBE (PRIVADO)</b>\n\n"
-        "O robô enviará o vídeo MP4, a Thumbnail 16:9, Título SEO, Descrição Completa e Tags diretamente para o seu Canal do YouTube no modo <b>Privado</b>!\n\n"
-        "Selecione um dos filmes concluídos abaixo ou <b>digite o nome do filme</b> no chat:"
-    )
-
-    keyboard = []
-    for m in movies:
-        keyboard.append([InlineKeyboardButton(f"🎬 {m[1]} ({m[2].upper()})", callback_data=f"yt_sel_m_id:{m[0]}")])
-    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
-
-    markup = InlineKeyboardMarkup(keyboard)
-
-    if update.message:
-        await update.message.reply_text(text, reply_markup=markup, parse_mode="HTML")
-    elif update.callback_query:
-        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
-
-    return STATE_YT_SELECT_MOVIE
-
-
-async def handle_youtube_select_movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    if query:
-        await query.answer()
-        data = query.data
-        if data == "cancel_post":
-            await query.edit_message_text("❌ Operação cancelada.")
-            return ConversationHandler.END
-
-        tmdb_id = int(data.split(":")[1])
-        movie_info = get_movie_details(tmdb_id, language="pt-BR")
-    else:
-        user_text = update.message.text.strip()
-        msg_wait = await update.message.reply_text(f"🔍 Buscando '{user_text}' no TMDB...")
-        results = search_movies(user_text, language="pt-BR")
-        if not results:
-            await msg_wait.edit_text("❌ Nenhum filme encontrado. Digite outro nome:")
-            return STATE_YT_SELECT_MOVIE
-        movie_info = get_movie_details(results[0]["id"], language="pt-BR")
-
+async def _resolve_and_prepare_upload_assets(movie_info: dict, target_msg, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Resolve a slug, faz download do vídeo MP4 do Drive (se necessário) com barra de progresso,
+    carrega ou gera o Guia SEO e localiza a Thumbnail 16:9.
+    """
     title_pt = movie_info.get("title", "")
     release_date = movie_info.get("release_date", "")
     year = release_date[:4] if release_date else ""
 
-    # Gera lista de slugs candidatas (dando prioridade total ao titulo em portugues + ano)
-    import re
     slug_candidates = []
     if movie_info.get("slug"):
         slug_candidates.append(movie_info.get("slug"))
@@ -2614,20 +2453,13 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
             slug_candidates.append(f"{slug_orig}_{year}")
         slug_candidates.append(slug_orig)
 
-    # Escolhe a slug que realmente existe nas pastas locais ou no Drive
     slug = slug_candidates[0]
     for cand in slug_candidates:
         if os.path.exists(f"temp/{cand}") or os.path.exists(f"output/{cand}.mp4") or os.path.exists(f"temp/{cand}.txt"):
             slug = cand
             break
 
-    context.user_data["yt_movie_info"] = movie_info
-    context.user_data["yt_slug"] = slug
-
-
-    # Envia mensagem inicial avisando que esta preparando o projeto
-    target = query.message if query else update.message
-    status_msg = await target.reply_text(
+    status_msg = await target_msg.reply_text(
         f"🔍 <b>Localizando arquivos do filme '{title_pt}'...</b>",
         parse_mode="HTML"
     )
@@ -2658,7 +2490,7 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
             try:
                 await status_msg.edit_text(text, parse_mode="HTML")
             except Exception as e:
-                logging.warning(f"Aviso edicao progresso drive: {e}")
+                logging.debug(f"Aviso edicao progresso drive: {e}")
 
         try:
             if loop and loop.is_running():
@@ -2668,10 +2500,9 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
         except Exception as err:
             logging.error(f"Erro agendamento progresso drive: {err}")
 
-    # Prepara o Guia de Postagem (Reutiliza o guia_postagem.json existente se houver)
+    # 1. Guia de Postagem
     guide_path = f"temp/{slug}/guia_postagem.json"
     guide_data = None
-
     if not os.path.exists(guide_path):
         os.makedirs(f"temp/{slug}", exist_ok=True)
         drive = get_drive_service()
@@ -2684,17 +2515,13 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
         try:
             with open(guide_path, "r", encoding="utf-8") as gf:
                 guide_data = json.load(gf)
-            logging.info(f"✅ Guia de Postagem reutilizado do arquivo existente: {guide_path}")
         except Exception as ge:
             logging.warning(f"Aviso ao ler {guide_path}: {ge}")
 
     if not guide_data:
-        logging.info("ℹ️ Guia existente não encontrado. Gerando novo Guia via IA...")
         guide_data = generate_youtube_post_guide(movie_info)
 
-    context.user_data["yt_guide"] = guide_data
-
-    # Localiza o vídeo MP4 local ou faz download do Drive com barra de progresso
+    # 2. Localiza o vídeo MP4
     video_path = f"output/{slug}.mp4"
     if not os.path.exists(video_path):
         video_path = f"temp/{slug}/{slug}.mp4"
@@ -2713,9 +2540,7 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
             if drive_file and os.path.exists(drive_file):
                 video_path = drive_file
 
-    context.user_data["yt_video_path"] = video_path
-
-    # Localiza a thumbnail PNG
+    # 3. Localiza a thumbnail PNG
     thumb_path = f"temp/{slug}/thumbnail.png"
     if not os.path.exists(thumb_path):
         drive = get_drive_service()
@@ -2724,23 +2549,75 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
             if d_thumb and os.path.exists(d_thumb):
                 thumb_path = d_thumb
 
-    context.user_data["yt_thumb_path"] = thumb_path if os.path.exists(thumb_path) else None
-
-    # Remove mensagem temporaria de download/carregamento
     try:
         await status_msg.delete()
     except Exception:
         pass
+
+    return slug, video_path, (thumb_path if os.path.exists(thumb_path) else None), guide_data
+
+
+# ==============================================================================
+# FLUXO 1: POSTAGEM NO YOUTUBE (PRIVADO)
+# ==============================================================================
+
+async def initiate_youtube_upload_standalone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    movies = await _fetch_recent_movies_for_upload()
+    text = (
+        "📺 <b>PUBLICADOR AUTOMÁTICO DO YOUTUBE (PRIVADO)</b>\n\n"
+        "O robô enviará o vídeo MP4, a Thumbnail 16:9, Título SEO, Descrição Completa e Tags diretamente para o seu Canal do YouTube no modo <b>Privado</b>!\n\n"
+        "Selecione um dos filmes concluídos abaixo ou <b>digite o nome do filme</b> no chat:"
+    )
+    keyboard = []
+    for m in movies:
+        keyboard.append([InlineKeyboardButton(f"🎬 {m[1]} ({m[2].upper()})", callback_data=f"yt_sel_m_id:{m[0]}")])
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
+
+    markup = InlineKeyboardMarkup(keyboard)
+    if update.message:
+        await update.message.reply_text(text, reply_markup=markup, parse_mode="HTML")
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
+    return STATE_YT_SELECT_MOVIE
+
+
+async def handle_youtube_select_movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    target_msg = query.message if query else update.message
+
+    if query:
+        await query.answer()
+        data = query.data
+        if data == "cancel_post":
+            await query.edit_message_text("❌ Operação cancelada.")
+            return ConversationHandler.END
+        tmdb_id = int(data.split(":")[1])
+        movie_info = get_movie_details(tmdb_id, language="pt-BR")
+    else:
+        user_text = update.message.text.strip()
+        msg_wait = await update.message.reply_text(f"🔍 Buscando '{user_text}' no TMDB...")
+        results = search_movies(user_text, language="pt-BR")
+        if not results:
+            await msg_wait.edit_text("❌ Nenhum filme encontrado. Digite outro nome:")
+            return STATE_YT_SELECT_MOVIE
+        movie_info = get_movie_details(results[0]["id"], language="pt-BR")
+
+    slug, video_path, thumb_path, guide_data = await _resolve_and_prepare_upload_assets(movie_info, target_msg, context)
+    context.user_data["yt_movie_info"] = movie_info
+    context.user_data["yt_slug"] = slug
+    context.user_data["yt_video_path"] = video_path
+    context.user_data["yt_thumb_path"] = thumb_path
+    context.user_data["yt_guide"] = guide_data
 
     has_video = os.path.exists(video_path)
     preview_msg = (
         f"📺 <b>PRÉVIA DA POSTAGEM NO YOUTUBE (PRIVADO)</b>\n\n"
         f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
         f"📌 <b>Título SEO:</b>\n<code>{guide_data['youtube_title']}</code>\n\n"
-        f"📄 <b>Descrição:</b>\n<code>{guide_data['description'][:300]}...</code>\n\n"
+        f"📄 <b>Descrição:</b>\n<code>{guide_data['description'][:280]}...</code>\n\n"
         f"🏷️ <b>Tags:</b> <code>{guide_data['tags'][:100]}...</code>\n\n"
-        f"📁 <b>Vídeo MP4:</b> <code>{os.path.basename(video_path)}</code> ({'✅ Encontrado' if has_video else '⚠️ Não localizador (usará teste)'})\n"
-        f"🖼️ <b>Thumbnail 16:9:</b> {'✅ Presente' if context.user_data['yt_thumb_path'] else '⚠️ Ausente'}\n\n"
+        f"📁 <b>Vídeo MP4:</b> <code>{os.path.basename(video_path)}</code> ({'✅ Encontrado' if has_video else '⚠️ Não localizado'})\n"
+        f"🖼️ <b>Thumbnail 16:9:</b> {'✅ Presente' if thumb_path else '⚠️ Ausente'}\n\n"
         f"Clique no botão abaixo para publicar agora no YouTube em modo <b>PRIVADO</b>:"
     )
 
@@ -2749,13 +2626,11 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
         [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
     ]
 
-    target = query.message if query else update.message
-
-    if context.user_data.get("yt_thumb_path"):
-        with open(context.user_data["yt_thumb_path"], "rb") as pf:
-            await target.reply_photo(photo=pf, caption=preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    if thumb_path and os.path.exists(thumb_path):
+        with open(thumb_path, "rb") as pf:
+            await target_msg.reply_photo(photo=pf, caption=preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     else:
-        await target.reply_text(preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await target_msg.reply_text(preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
 
     return STATE_YT_CONFIRM_UPLOAD
 
@@ -2764,14 +2639,12 @@ async def handle_youtube_execute_upload_callback(update: Update, context: Contex
     query = update.callback_query
     await query.answer()
 
-    data = query.data
-    if data == "cancel_post":
+    if query.data == "cancel_post":
         try:
-            await query.edit_message_caption("❌ Publicação no YouTube cancelada.")
+            await query.edit_message_caption("❌ Publicação cancelada.")
         except Exception:
-            await query.edit_message_text("❌ Publicação no YouTube cancelada.")
+            await query.edit_message_text("❌ Publicação cancelada.")
         return ConversationHandler.END
-
 
     movie_info = context.user_data.get("yt_movie_info", {})
     guide = context.user_data.get("yt_guide", {})
@@ -2779,7 +2652,10 @@ async def handle_youtube_execute_upload_callback(update: Update, context: Contex
     thumb_path = context.user_data.get("yt_thumb_path")
     movie_title = movie_info.get("title", "Filme")
 
-    # Envia a mensagem inicial de acompanhamento do upload
+    if not (video_path and os.path.exists(video_path)):
+        await query.message.reply_text("❌ Arquivo de vídeo MP4 não encontrado para upload.")
+        return ConversationHandler.END
+
     status_msg = await query.message.reply_text(
         f"⏳ <b>Iniciando upload de '{movie_title}' para o YouTube (Privado)...</b>\n"
         f"📦 Tamanho do Vídeo: <code>{os.path.getsize(video_path) / (1024*1024):.1f} MB</code>\n"
@@ -2796,40 +2672,23 @@ async def handle_youtube_execute_upload_callback(update: Update, context: Contex
         if now - last_edit < 3 and pct < 100:
             return
         last_edit = now
-
         curr_mb = current_bytes / (1024 * 1024)
         tot_mb = total_bytes / (1024 * 1024) if total_bytes else 0
         filled = int(pct / 10)
         bar = "█" * filled + "░" * (10 - filled)
-
         text = (
             f"📤 <b>ENVIANDO VÍDEO PARA O YOUTUBE (PRIVADO)...</b>\n\n"
             f"🎬 <b>Filme:</b> {movie_title}\n"
             f"📊 <b>Progresso:</b> <code>[{bar}] {pct:.1f}%</code>\n"
             f"📦 <b>Enviado:</b> <code>{curr_mb:.1f} MB / {tot_mb:.1f} MB</code>"
         )
-
         async def _do_edit():
             try:
-                await context.bot.edit_message_text(
-                    chat_id=status_msg.chat_id,
-                    message_id=status_msg.message_id,
-                    text=text,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                logging.warning(f"Aviso edicao progresso yt: {e}")
-
-        try:
-            if loop and loop.is_running():
-                asyncio.run_coroutine_threadsafe(_do_edit(), loop)
-            else:
-                asyncio.create_task(_do_edit())
-        except Exception as err:
-            logging.error(f"Erro agendamento progresso yt: {err}")
-
-    from src.youtube_uploader import upload_video_to_youtube
-    from src.database import mark_as_posted
+                await status_msg.edit_text(text, parse_mode="HTML")
+            except Exception:
+                pass
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(_do_edit(), loop)
 
     def _do_upload_thread():
         return upload_video_to_youtube(
@@ -2845,6 +2704,7 @@ async def handle_youtube_execute_upload_callback(update: Update, context: Contex
     res = await asyncio.to_thread(_do_upload_thread)
 
     if res.get("success"):
+        from src.database import mark_as_posted
         tmdb_id = movie_info.get("id") or movie_info.get("tmdb_id")
         if tmdb_id:
             mark_as_posted(tmdb_id)
@@ -2854,7 +2714,7 @@ async def handle_youtube_execute_upload_callback(update: Update, context: Contex
             f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
             f"🔒 <b>Privacidade:</b> Privado (Draft)\n"
             f"🔗 <b>Link no YouTube:</b> {res.get('video_url')}\n\n"
-            f"✅ Status do filme alterado para <code>posted</code> no banco de dados SQLite!"
+            f"✅ Status do filme alterado para <code>posted</code> no banco de dados!"
         )
         await status_msg.edit_text(msg_success, parse_mode="HTML")
     else:
@@ -2862,8 +2722,396 @@ async def handle_youtube_execute_upload_callback(update: Update, context: Contex
         err = html.escape(str(res.get("error", "Erro desconhecido")))
         await status_msg.edit_text(f"❌ <b>Falha no upload para o YouTube:</b>\n<code>{err}</code>", parse_mode="HTML")
 
+    return ConversationHandler.END
+
+
+# ==============================================================================
+# FLUXO 2: POSTAGEM NO DAILYMOTION (ALTA VELOCIDADE)
+# ==============================================================================
+
+async def initiate_dailymotion_upload_standalone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    movies = await _fetch_recent_movies_for_upload()
+    text = (
+        "🌐 <b>PUBLICADOR AUTOMÁTICO DO DAILYMOTION</b>\n\n"
+        "O robô enviará o vídeo MP4 em alta velocidade diretamente para o seu Canal do Dailymotion com Título e Descrição otimizados!\n\n"
+        "Selecione um dos filmes concluídos abaixo ou <b>digite o nome do filme</b> no chat:"
+    )
+    keyboard = []
+    for m in movies:
+        keyboard.append([InlineKeyboardButton(f"🎬 {m[1]} ({m[2].upper()})", callback_data=f"dm_sel_m_id:{m[0]}")])
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
+
+    markup = InlineKeyboardMarkup(keyboard)
+    if update.message:
+        await update.message.reply_text(text, reply_markup=markup, parse_mode="HTML")
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
+    return STATE_DM_SELECT_MOVIE
+
+
+async def handle_dailymotion_select_movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    target_msg = query.message if query else update.message
+
+    if query:
+        await query.answer()
+        data = query.data
+        if data == "cancel_post":
+            await query.edit_message_text("❌ Operação cancelada.")
+            return ConversationHandler.END
+        tmdb_id = int(data.split(":")[1])
+        movie_info = get_movie_details(tmdb_id, language="pt-BR")
+    else:
+        user_text = update.message.text.strip()
+        msg_wait = await update.message.reply_text(f"🔍 Buscando '{user_text}' no TMDB...")
+        results = search_movies(user_text, language="pt-BR")
+        if not results:
+            await msg_wait.edit_text("❌ Nenhum filme encontrado. Digite outro nome:")
+            return STATE_DM_SELECT_MOVIE
+        movie_info = get_movie_details(results[0]["id"], language="pt-BR")
+
+    slug, video_path, thumb_path, guide_data = await _resolve_and_prepare_upload_assets(movie_info, target_msg, context)
+    context.user_data["dm_movie_info"] = movie_info
+    context.user_data["dm_slug"] = slug
+    context.user_data["dm_video_path"] = video_path
+    context.user_data["dm_guide"] = guide_data
+
+    has_video = os.path.exists(video_path)
+    preview_msg = (
+        f"🌐 <b>PRÉVIA DA POSTAGEM NO DAILYMOTION</b>\n\n"
+        f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
+        f"📌 <b>Título:</b>\n<code>{guide_data['youtube_title']}</code>\n\n"
+        f"📄 <b>Descrição:</b>\n<code>{guide_data['description'][:280]}...</code>\n\n"
+        f"📁 <b>Vídeo MP4:</b> <code>{os.path.basename(video_path)}</code> ({'✅ Encontrado' if has_video else '⚠️ Não localizado'})\n"
+        f"📂 <b>Categoria:</b> <code>TV / Filmes</code>\n"
+        f"🔒 <b>Visibilidade:</b> <code>Público</code>\n\n"
+        f"Clique no botão abaixo para iniciar o upload de alta velocidade para o Dailymotion:"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("🚀 Confirmar Upload no Dailymotion", callback_data="exec_dm_upload")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
+    ]
+
+    if thumb_path and os.path.exists(thumb_path):
+        with open(thumb_path, "rb") as pf:
+            await target_msg.reply_photo(photo=pf, caption=preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    else:
+        await target_msg.reply_text(preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    return STATE_DM_CONFIRM_UPLOAD
+
+
+async def handle_dailymotion_execute_upload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "cancel_post":
+        try:
+            await query.edit_message_caption("❌ Publicação cancelada.")
+        except Exception:
+            await query.edit_message_text("❌ Publicação cancelada.")
+        return ConversationHandler.END
+
+    movie_info = context.user_data.get("dm_movie_info", {})
+    guide = context.user_data.get("dm_guide", {})
+    video_path = context.user_data.get("dm_video_path", "")
+    movie_title = movie_info.get("title", "Filme")
+
+    if not (video_path and os.path.exists(video_path)):
+        await query.message.reply_text("❌ Arquivo de vídeo MP4 não encontrado para upload.")
+        return ConversationHandler.END
+
+    status_msg = await query.message.reply_text(
+        f"⏳ <b>Iniciando upload de '{movie_title}' para o Dailymotion...</b>\n"
+        f"📦 Tamanho: <code>{os.path.getsize(video_path) / (1024*1024):.1f} MB</code>\n"
+        f"📊 Progresso: <code>[░░░░░░░░░░] 0%</code>",
+        parse_mode="HTML"
+    )
+
+    loop = asyncio.get_running_loop()
+    last_edit = 0
+
+    def dm_progress_cb(pct, current_bytes, total_bytes):
+        nonlocal last_edit
+        now = time.time()
+        if now - last_edit < 3 and pct < 100:
+            return
+        last_edit = now
+        curr_mb = current_bytes / (1024 * 1024)
+        tot_mb = total_bytes / (1024 * 1024) if total_bytes else 0
+        filled = int(pct / 10)
+        bar = "█" * filled + "░" * (10 - filled)
+        text = (
+            f"📤 <b>ENVIANDO VÍDEO PARA O DAILYMOTION...</b>\n\n"
+            f"🎬 <b>Filme:</b> {movie_title}\n"
+            f"📊 <b>Progresso:</b> <code>[{bar}] {pct:.1f}%</code>\n"
+            f"📦 <b>Enviado:</b> <code>{curr_mb:.1f} MB / {tot_mb:.1f} MB</code>"
+        )
+        async def _do_edit():
+            try:
+                await status_msg.edit_text(text, parse_mode="HTML")
+            except Exception:
+                pass
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(_do_edit(), loop)
+
+    def _do_dm_upload_thread():
+        return upload_video_to_dailymotion(
+            video_path=video_path,
+            title=guide.get("youtube_title", movie_info.get("title", "Vídeo")),
+            description=guide.get("description", ""),
+            category="tv",
+            visibility="public",
+            progress_callback=dm_progress_cb
+        )
+
+    res = await asyncio.to_thread(_do_dm_upload_thread)
+
+    if res.get("success"):
+        from src.database import mark_as_posted
+        tmdb_id = movie_info.get("id") or movie_info.get("tmdb_id")
+        if tmdb_id:
+            mark_as_posted(tmdb_id)
+
+        msg_success = (
+            f"🎉 <b>VÍDEO PUBLICADO NO DAILYMOTION COM SUCESSO!</b>\n\n"
+            f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
+            f"🌐 <b>Canal:</b> Dailymotion\n"
+            f"🔗 <b>Link no Dailymotion:</b> {res.get('video_url')}\n\n"
+            f"✅ Status do filme atualizado no banco de dados!"
+        )
+        await status_msg.edit_text(msg_success, parse_mode="HTML")
+    else:
+        import html
+        err = html.escape(str(res.get("error", "Erro desconhecido")))
+        await status_msg.edit_text(f"❌ <b>Falha no upload para o Dailymotion:</b>\n<code>{err}</code>", parse_mode="HTML")
 
     return ConversationHandler.END
+
+
+# ==============================================================================
+# FLUXO 3: POSTAGEM SIMULTÂNEA (YOUTUBE + DAILYMOTION EM PARALELO)
+# ==============================================================================
+
+async def initiate_simultaneous_upload_standalone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    movies = await _fetch_recent_movies_for_upload()
+    text = (
+        "🚀 <b>POSTAGEM SIMULTÂNEA: YOUTUBE + DAILYMOTION</b>\n\n"
+        "O robô enviará o vídeo em <b>paralelo</b> para o <b>YouTube (Privado)</b> e para o <b>Dailymotion</b> simultaneamente com velocidade máxima!\n\n"
+        "Selecione um dos filmes concluídos abaixo ou <b>digite o nome do filme</b> no chat:"
+    )
+    keyboard = []
+    for m in movies:
+        keyboard.append([InlineKeyboardButton(f"🎬 {m[1]} ({m[2].upper()})", callback_data=f"simul_sel_m_id:{m[0]}")])
+    keyboard.append([InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")])
+
+    markup = InlineKeyboardMarkup(keyboard)
+    if update.message:
+        await update.message.reply_text(text, reply_markup=markup, parse_mode="HTML")
+    elif update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=markup, parse_mode="HTML")
+    return STATE_SIMUL_SELECT_MOVIE
+
+
+async def handle_simultaneous_select_movie_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    target_msg = query.message if query else update.message
+
+    if query:
+        await query.answer()
+        data = query.data
+        if data == "cancel_post":
+            await query.edit_message_text("❌ Operação cancelada.")
+            return ConversationHandler.END
+        tmdb_id = int(data.split(":")[1])
+        movie_info = get_movie_details(tmdb_id, language="pt-BR")
+    else:
+        user_text = update.message.text.strip()
+        msg_wait = await update.message.reply_text(f"🔍 Buscando '{user_text}' no TMDB...")
+        results = search_movies(user_text, language="pt-BR")
+        if not results:
+            await msg_wait.edit_text("❌ Nenhum filme encontrado. Digite outro nome:")
+            return STATE_SIMUL_SELECT_MOVIE
+        movie_info = get_movie_details(results[0]["id"], language="pt-BR")
+
+    slug, video_path, thumb_path, guide_data = await _resolve_and_prepare_upload_assets(movie_info, target_msg, context)
+    context.user_data["simul_movie_info"] = movie_info
+    context.user_data["simul_slug"] = slug
+    context.user_data["simul_video_path"] = video_path
+    context.user_data["simul_thumb_path"] = thumb_path
+    context.user_data["simul_guide"] = guide_data
+
+    has_video = os.path.exists(video_path)
+    preview_msg = (
+        f"🚀 <b>PRÉVIA DA POSTAGEM SIMULTÂNEA (YT + DM)</b>\n\n"
+        f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
+        f"📌 <b>Título SEO:</b>\n<code>{guide_data['youtube_title']}</code>\n\n"
+        f"📄 <b>Descrição:</b>\n<code>{guide_data['description'][:280]}...</code>\n\n"
+        f"📁 <b>Vídeo MP4:</b> <code>{os.path.basename(video_path)}</code> ({'✅ Encontrado' if has_video else '⚠️ Não localizado'})\n"
+        f"🖼️ <b>Thumbnail:</b> {'✅ Presente' if thumb_path else '⚠️ Ausente'}\n\n"
+        f"📡 <b>Destinos:</b>\n"
+        f" • 📺 <b>YouTube:</b> Modo Privado (Draft)\n"
+        f" • 🌐 <b>Dailymotion:</b> Modo Público (Streaming HD)\n\n"
+        f"Clique no botão abaixo para disparar o upload simultâneo em paralelo:"
+    )
+
+    keyboard = [
+        [InlineKeyboardButton("🚀 Iniciar Postagem Simultânea (YT + DM)", callback_data="exec_simul_upload")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
+    ]
+
+    if thumb_path and os.path.exists(thumb_path):
+        with open(thumb_path, "rb") as pf:
+            await target_msg.reply_photo(photo=pf, caption=preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+    else:
+        await target_msg.reply_text(preview_msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+    return STATE_SIMUL_CONFIRM_UPLOAD
+
+
+async def handle_simultaneous_execute_upload_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    if query.data == "cancel_post":
+        try:
+            await query.edit_message_caption("❌ Publicação simultânea cancelada.")
+        except Exception:
+            await query.edit_message_text("❌ Publicação simultânea cancelada.")
+        return ConversationHandler.END
+
+    movie_info = context.user_data.get("simul_movie_info", {})
+    guide = context.user_data.get("simul_guide", {})
+    video_path = context.user_data.get("simul_video_path", "")
+    thumb_path = context.user_data.get("simul_thumb_path")
+    movie_title = movie_info.get("title", "Filme")
+
+    if not (video_path and os.path.exists(video_path)):
+        await query.message.reply_text("❌ Arquivo de vídeo MP4 não encontrado para upload.")
+        return ConversationHandler.END
+
+    file_size_mb = os.path.getsize(video_path) / (1024 * 1024)
+
+    status_msg = await query.message.reply_text(
+        f"🚀 <b>INICIANDO POSTAGEM SIMULTÂNEA (PARALELA)...</b>\n\n"
+        f"🎬 <b>Filme:</b> {movie_title}\n"
+        f"📦 <b>Tamanho:</b> <code>{file_size_mb:.1f} MB</code>\n\n"
+        f"📺 <b>YouTube:</b> <code>[░░░░░░░░░░] 0.0%</code> ⏳\n"
+        f"🌐 <b>Dailymotion:</b> <code>[░░░░░░░░░░] 0.0%</code> ⏳\n\n"
+        f"⚡ <i>Conectando servidores e iniciando envio concorrente...</i>",
+        parse_mode="HTML"
+    )
+
+    loop = asyncio.get_running_loop()
+    yt_pct = 0.0
+    dm_pct = 0.0
+    yt_done = False
+    dm_done = False
+    last_edit = 0.0
+
+    def trigger_ui_update():
+        nonlocal last_edit
+        now = time.time()
+        if now - last_edit < 2.5 and not (yt_done and dm_done):
+            return
+        last_edit = now
+
+        bar_yt = "█" * int(yt_pct / 10) + "░" * (10 - int(yt_pct / 10))
+        bar_dm = "█" * int(dm_pct / 10) + "░" * (10 - int(dm_pct / 10))
+
+        text = (
+            f"🚀 <b>POSTAGEM SIMULTÂNEA EM ANDAMENTO (PARALELO)...</b>\n\n"
+            f"🎬 <b>Filme:</b> {movie_title}\n"
+            f"📦 <b>Tamanho:</b> <code>{file_size_mb:.1f} MB</code>\n\n"
+            f"📺 <b>YouTube:</b> <code>[{bar_yt}] {yt_pct:.1f}%</code> {'✅ Concluído' if yt_done else '⏳ Enviando...'}\n"
+            f"🌐 <b>Dailymotion:</b> <code>[{bar_dm}] {dm_pct:.1f}%</code> {'✅ Concluído' if dm_done else '⏳ Enviando...'}\n\n"
+            f"⚡ <i>Saturando banda com uploads concorrentes de alta velocidade...</i>"
+        )
+
+        async def _do_edit():
+            try:
+                await status_msg.edit_text(text, parse_mode="HTML")
+            except Exception:
+                pass
+
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(_do_edit(), loop)
+
+    def yt_progress_cb(pct, current_bytes, total_bytes):
+        nonlocal yt_pct
+        yt_pct = pct
+        trigger_ui_update()
+
+    def dm_progress_cb(pct, current_bytes, total_bytes):
+        nonlocal dm_pct
+        dm_pct = pct
+        trigger_ui_update()
+
+    def _worker_yt():
+        nonlocal yt_done
+        res = upload_video_to_youtube(
+            video_path=video_path,
+            title=guide.get("youtube_title", movie_info.get("title", "Vídeo")),
+            description=guide.get("description", ""),
+            tags=guide.get("tags", ""),
+            thumbnail_path=thumb_path,
+            privacy_status="private",
+            progress_callback=yt_progress_cb
+        )
+        yt_done = True
+        trigger_ui_update()
+        return res
+
+    def _worker_dm():
+        nonlocal dm_done
+        res = upload_video_to_dailymotion(
+            video_path=video_path,
+            title=guide.get("youtube_title", movie_info.get("title", "Vídeo")),
+            description=guide.get("description", ""),
+            category="tv",
+            visibility="public",
+            progress_callback=dm_progress_cb
+        )
+        dm_done = True
+        trigger_ui_update()
+        return res
+
+    # Executa os dois uploads simultaneamente em threads paralelas
+    res_yt, res_dm = await asyncio.gather(
+        asyncio.to_thread(_worker_yt),
+        asyncio.to_thread(_worker_dm)
+    )
+
+    from src.database import mark_as_posted
+    tmdb_id = movie_info.get("id") or movie_info.get("tmdb_id")
+    if tmdb_id and (res_yt.get("success") or res_dm.get("success")):
+        mark_as_posted(tmdb_id)
+
+    # Monta o relatório final com os links
+    yt_success = res_yt.get("success", False)
+    dm_success = res_dm.get("success", False)
+
+    summary_lines = [
+        f"🎉 <b>POSTAGEM SIMULTÂNEA CONCLUÍDA!</b>\n",
+        f"🎬 <b>Filme:</b> {movie_info.get('title')}\n"
+    ]
+
+    if yt_success:
+        summary_lines.append(f"📺 <b>YouTube:</b> ✅ Publicado (Privado)\n🔗 <b>Link:</b> {res_yt.get('video_url')}\n")
+    else:
+        summary_lines.append(f"📺 <b>YouTube:</b> ❌ Falha ({res_yt.get('error', 'Erro')})\n")
+
+    if dm_success:
+        summary_lines.append(f"🌐 <b>Dailymotion:</b> ✅ Publicado (Público)\n🔗 <b>Link:</b> {res_dm.get('video_url')}\n")
+    else:
+        summary_lines.append(f"🌐 <b>Dailymotion:</b> ❌ Falha ({res_dm.get('error', 'Erro')})\n")
+
+    summary_lines.append("✅ Status do filme atualizado no banco de dados SQLite / PostgreSQL!")
+
+    await status_msg.edit_text("\n".join(summary_lines), parse_mode="HTML")
+    return ConversationHandler.END
+
 
 
 

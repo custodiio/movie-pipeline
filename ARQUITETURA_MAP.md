@@ -75,6 +75,16 @@ Tabela `movies`:
 - **`run_sales_bot.py`**:
   - Script principal na raiz para inicialização e execução contínua do Bot de Vendas `@telacheiafilmes_bot` em segundo plano.
 
+- **`src/youtube_uploader.py`**:
+  - Módulo de upload automático para o YouTube via API v3 (`google-api-python-client`).
+  - Realiza o upload do vídeo final MP4 em partes resumable de 10 MB, aplicando o Título de Captura SEO (max 100 caracteres), a Descrição Adaptada, as Tags de alta busca, a Thumbnail 16:9 e o status de privacidade **Privado** (`privacyStatus="private"`).
+
+- **`src/dailymotion_uploader.py`**:
+  - Módulo de upload de alta velocidade para o **Dailymotion API v2**.
+  - Autenticação OAuth 2.0 via `client_credentials` com o escopo `video.manage`.
+  - Abertura de sessão em `POST /v2/files/upload_sessions`, upload streamado com chunking de 1 MB e callback de progresso em tempo real (MB/s, % e MB).
+  - Publicação e vinculação sob o perfil do canal (`POST /v2/profiles/{profile_id}/videos`) com título, descrição, categoria (`tv`) e visibilidade pública.
+
 - **`src/telegram_bot.py`**:
   - Módulo assíncrono do Bot Admin do Telegram (`@TelaCheiaadmin_bot`) para automação de postagens.
   - **Fluxo 1 (Canal Público `@dramasleh`)**: Busca filmes no TMDB por nome, inclui a pergunta interativa do formato de áudio (`STATE_SELECT_AUDIO`: `🔊 DUBLADO`, `💬 LEGENDADO` ou `🔊💬 DUBLADO / LEGENDADO`), filtra e organiza a galeria de imagens (Pôsteres PT, EN, Variadas), gera a Copy de Vendas com o layout padrão estrito e botão Inline `[🔒 Solicitar Acesso Vitalício R$10,00]` direcionado para o Bot de Vendas `@TelaCheiaFilmes_bot` (`https://t.me/TelaCheiaFilmes_bot?start=comprar_vip`) e o botão de Suporte (`@leh_lurdes`), enviando com preview e confirmação para o admin publicar no canal público.
@@ -82,17 +92,9 @@ Tabela `movies`:
   - **Fluxo 3 (Produzir Filme - Pipeline)**: Pesquisa o filme em alta no TMDB que ainda não foi postado e solicita confirmação do admin (`[✅ Confirmar Produção]` ou `[✏️ Definir Título Manualmente]`). Ao confirmar, realiza a limpeza completa dos arquivos temporários locais (`temp/` e `output/`) e no Google Drive (`Movie-Pipeline/Projetos/`), faz upload do arquivo de metadados (`.txt`), dispara o pipeline no Kaggle via GitHub Actions com GPU Tesla T4 e atualiza o status do banco SQLite para `'selected'` e posteriormente para `'concluido'` ao finalizar a renderização.
   - **Fluxo 4 (Gerador de Thumbnail 16:9 & Guia do YouTube)**: Permite a seleção de imagem de fundo 16:9 (via TMDB Backdrops ou envio manual no chat), aplicação da logo transparente do filme com proporção escalável (15% a 40%) e posicionamento em grid de 9 posições via Pillow (PIL). Conduz a geração do Guia de Postagem do YouTube contendo Título de Captura, Descrição Padrão formatada com elenco/diretor real, CTAs e Disclaimer fixo, e Tags de alta relevância separadas por vírgula, salvando `guia_postagem.txt`/`.json` e `thumbnail.png` no Google Drive.
   - **Fluxo 5 (Baixar Torrent Magnet p/ VIP)**: Permite o envio de qualquer link Magnet (`magnet:?xt=urn:btih:...`) via botão no menu ou comando (`/torrent`, `/magnet`), realiza o download em velocidade máxima via Aria2c com mais de 12 rastreadores públicos injetados, exibe o progresso em tempo real (taxa MB/s, % e ETA), divide arquivos > 2GB/4GB instantaneamente com FFmpeg `-c copy` e realiza o upload para o Canal VIP via Telethon MTProto com barra de progresso.
-- **`src/thumbnail_generator.py`**:
-  - Módulo de busca de imagens HD 16:9 (backdrops e logos transparentes) no TMDB e composição visual de Thumbnails em 1280x720 com sobreposição proporcional e posicionamento em 9 quadrantes via Pillow (PIL).
-- **`src/post_guide_generator.py`**:
-  - Módulo de geração de guias de postagem do YouTube via IA com 3 requisições isoladas (`Azure OpenAI` -> `Gemini` -> `DeepSeek` -> `OpenAI`):
-    1. **Título SEO de Captura**: Nome do filme em destaque + ganchos SEO em CAIXA ALTA focados em capturar buscas (`ASSISTIR [TITULO] COMPLETO HD`, `[TITULO] DUBLADO FULL HD GRÁTIS`).
-    2. **Descrição Completa com Liberdade Criativa**: 2 parágrafos persuasivos adaptando a sinopse ao filme, elenco principal e diretor do TMDB, chamadas para ação (Inscrição, Like, Compartilhar) + **Hashtags em Alta** geradas via IA em requisição isolada + **Disclaimer Fixo de Direitos Autorais**.
-    3. **Tags de Alta Busca**: Lista de palavras-chave altamente buscadas no YouTube separadas por vírgula em requisição isolada.
-
-- **`src/youtube_uploader.py`**:
-  - Módulo de upload automático para o YouTube via API v3 (`google-api-python-client`).
-  - Realiza o upload do vídeo final MP4 em partes resumable de 10 MB, aplicando o Título de Captura SEO (max 100 caracteres), a Descrição Adaptada, as Tags de alta busca, a Thumbnail 16:9 e o status de privacidade **Privado** (`privacyStatus="private"`).
+  - **Fluxo 6 (Postar no YouTube)**: Publica vídeos no YouTube em modo Privado com Título SEO, Descrição, Tags e Thumbnail com acompanhamento de progresso em tempo real.
+  - **Fluxo 7 (Postar no Dailymotion)**: Publica vídeos no Dailymotion via API v2 com upload streamado e acompanhamento de progresso em tempo real.
+  - **Fluxo 8 (Postagem Simultânea YT + DM)**: Dispara simultaneamente os uploads para o YouTube e para o Dailymotion em paralelo (`asyncio.gather`), mantendo barra de progresso sincronizada para ambas as plataformas e fornecendo os dois links diretos ao final.
 
 
 - **`inject_secrets.py`**:
