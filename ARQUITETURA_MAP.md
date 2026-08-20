@@ -81,8 +81,9 @@ Tabela `movies`:
 
 - **`src/dailymotion_uploader.py`**:
   - Módulo de upload de alta velocidade para o **Dailymotion API v2**.
-  - Autenticação OAuth 2.0 via `client_credentials` com o escopo `video.manage`.
-  - Abertura de sessão em `POST /v2/files/upload_sessions`, upload streamado com chunking de 1 MB e callback de progresso em tempo real (MB/s, % e MB).
+  - Autenticação OAuth 2.0 via `client_credentials` com o escopo `video.manage` e extração dinâmica do `profile_id` direto do token JWT.
+  - **Adaptação Automática de Limites**: Se o vídeo ultrapassar 2 horas (120 min), realiza o corte instantâneo em ~1s com FFmpeg `-c copy` para `01:59:50`. Se o tamanho exceder 3.9 GB, comprime em alta velocidade para caber no limite oficial de 4.0 GB do Dailymotion.
+  - Abertura de sessão em `POST /v2/files/upload_sessions`, upload streamado com chunking de 1 MB, medição de velocidade e callback de progresso em tempo real.
   - Publicação e vinculação sob o perfil do canal (`POST /v2/profiles/{profile_id}/videos`) com título, descrição, categoria (`tv`) e visibilidade pública.
 
 - **`src/telegram_bot.py`**:
