@@ -10,6 +10,9 @@ Fornece:
 
 import os
 import time
+import json
+import base64
+import subprocess
 import logging
 import httpx
 from typing import Callable, Optional
@@ -32,6 +35,21 @@ def get_dailymotion_credentials() -> tuple[str, str]:
     client_id = os.getenv("DAILYMOTION_CLIENT_ID") or os.getenv("DAILYMOTION_API_KEY", "")
     client_secret = os.getenv("DAILYMOTION_CLIENT_SECRET") or os.getenv("DAILYMOTION_API_SECRET", "")
     return client_id.strip().strip("\"'").strip(), client_secret.strip().strip("\"'").strip()
+
+
+def extract_profile_id_from_token(token: str) -> str:
+    """Extrai dinamicamente o sub (profile_id) do payload JWT do token Dailymotion."""
+    try:
+        parts = token.split(".")
+        if len(parts) >= 2:
+            payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64).decode("utf-8"))
+            sub = payload.get("sub")
+            if sub:
+                return str(sub)
+    except Exception as e:
+        logging.warning(f"Aviso ao extrair sub do token JWT: {e}")
+    return "x5yz68a"
 
 
 def get_dailymotion_access_token(force_refresh: bool = False) -> str:
@@ -87,6 +105,93 @@ def create_upload_session(token: str) -> dict:
         if res.status_code not in (200, 201):
             raise RuntimeError(f"Erro ao criar sessão de upload Dailymotion ({res.status_code}): {res.text}")
         return res.json()
+
+
+def get_video_info(video_path: str) -> tuple[float, int]:
+    """Retorna (duracao_em_segundos, tamanho_em_bytes) usando ffprobe."""
+    cmd = [
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration,size",
+        "-of", "json", video_path
+    ]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        if res.returncode == 0:
+            data = json.loads(res.stdout)
+            dur = float(data.get("format", {}).get("duration", 0))
+            size = int(data.get("format", {}).get("size", 0))
+            return dur, size
+    except Exception as e:
+        logging.warning(f"Aviso ao obter metadados com ffprobe: {e}")
+    return 0.0, os.path.getsize(video_path) if os.path.exists(video_path) else 0
+
+
+def adapt_video_for_dailymotion(video_path: str, max_duration_sec: int = 7190, max_size_mb: int = 3900) -> tuple[str, bool]:
+    """
+    Garante que o vídeo respeite os limites estritos do Dailymotion Standard Creator:
+    1. Duração máxima de 01:59:50 (limite oficial: 2 horas / 7200s).
+    2. Tamanho máximo de 3.9 GB (limite oficial: 4.0 GB).
+    
+    Executa corte instantâneo em 1-2 segundos via FFmpeg Stream Copy (-c copy).
+    Retorna (caminho_do_video_final, is_arquivo_temporario).
+    """
+    if not os.path.exists(video_path):
+        return video_path, False
+
+    dur, size_bytes = get_video_info(video_path)
+    size_mb = size_bytes / (1024 * 1024)
+    current_path = video_path
+    is_temp = False
+
+    # 1. Recorte de Duração instantâneo (-c copy em segundos) se ultrapassar 01:59:50
+    if dur > max_duration_sec:
+        dir_name = os.path.dirname(video_path) or "temp"
+        base_name = os.path.basename(video_path)
+        trimmed_path = os.path.join(dir_name, f"dm_trimmed_{base_name}")
+        logging.info(f"✂️ Vídeo tem {dur/60:.1f} min (> 2h). Recortando instantaneamente para 01:59:50 com -c copy...")
+
+        cmd_trim = [
+            "ffmpeg", "-y", "-ss", "00:00:00", "-i", video_path,
+            "-t", "01:59:50", "-c", "copy", trimmed_path
+        ]
+        res = subprocess.run(cmd_trim, capture_output=True, text=True)
+        if res.returncode == 0 and os.path.exists(trimmed_path):
+            current_path = trimmed_path
+            is_temp = True
+            dur, size_bytes = get_video_info(current_path)
+            size_mb = size_bytes / (1024 * 1024)
+            logging.info(f"✅ Vídeo recortado em ~1s: {size_mb:.1f} MB | {dur/60:.1f} min")
+
+    # 2. Otimização de Bitrate ultra-rápida (se após o corte ainda for > 3.9 GB)
+    if size_mb > max_size_mb:
+        dir_name = os.path.dirname(video_path) or "temp"
+        base_name = os.path.basename(video_path)
+        compressed_path = os.path.join(dir_name, f"dm_opt_{base_name}")
+        effective_dur = min(dur, max_duration_sec) if dur > 0 else 7190
+        target_bitrate_kbps = max(1500, int((3700 * 8192) / effective_dur))
+        logging.info(f"⚡ Ajustando bitrate para caber no limite de 4 GB ({target_bitrate_kbps} kbps)...")
+
+        cmd_comp = [
+            "ffmpeg", "-y", "-i", current_path,
+            "-c:v", "libx264", "-preset", "veryfast",
+            "-b:v", f"{target_bitrate_kbps}k",
+            "-maxrate", f"{int(target_bitrate_kbps * 1.2)}k",
+            "-bufsize", f"{target_bitrate_kbps * 2}k",
+            "-c:a", "copy",
+            compressed_path
+        ]
+        res = subprocess.run(cmd_comp, capture_output=True, text=True)
+        if res.returncode == 0 and os.path.exists(compressed_path):
+            if is_temp and os.path.exists(current_path):
+                try:
+                    os.remove(current_path)
+                except Exception:
+                    pass
+            current_path = compressed_path
+            is_temp = True
+            logging.info(f"✅ Vídeo otimizado com sucesso: {os.path.getsize(current_path)/(1024*1024):.1f} MB")
+
+    return current_path, is_temp
 
 
 class ProgressFileReader:
@@ -146,20 +251,24 @@ def upload_video_to_dailymotion(
 ) -> dict:
     """
     Executa o pipeline completo de upload e publicação de um vídeo no Dailymotion:
-    1. Obtém token v2
-    2. Cria sessão de upload
-    3. Faz o upload streaming do arquivo com acompanhamento de progresso
-    4. Cria e publica o objeto de vídeo no perfil do canal
+    1. Adapta duração (< 2h) e tamanho (< 4GB) instantaneamente com FFmpeg
+    2. Obtém token v2 e resolve profile_id dinâmico
+    3. Cria sessão de upload
+    4. Faz o upload streaming do arquivo com acompanhamento de progresso
+    5. Cria e publica o objeto de vídeo no perfil do canal
     """
     if not os.path.exists(video_path):
         return {"success": False, "error": f"Arquivo de vídeo não encontrado: {video_path}"}
 
+    upload_file_path, is_temp = adapt_video_for_dailymotion(video_path)
+
     try:
-        file_size = os.path.getsize(video_path)
+        file_size = os.path.getsize(upload_file_path)
         logging.info(f"🌐 Iniciando upload para Dailymotion: '{title}' ({file_size / (1024*1024):.1f} MB)...")
 
-        # 1. Autenticação
+        # 1. Autenticação & Profile ID
         token = get_dailymotion_access_token()
+        effective_profile_id = extract_profile_id_from_token(token) if (not profile_id or profile_id == "x5yz68a") else profile_id
 
         # 2. Sessão de Upload
         session = create_upload_session(token)
@@ -169,11 +278,11 @@ def upload_video_to_dailymotion(
 
         # 3. Upload streamado do arquivo
         logging.info(f"📤 Enviando stream de vídeo para {upload_url[:50]}...")
-        with ProgressFileReader(video_path, progress_callback=progress_callback) as p_file:
-            with httpx.Client(timeout=httpx.Timeout(connect=30.0, read=300.0, write=300.0, pool=30.0)) as client:
+        with ProgressFileReader(upload_file_path, progress_callback=progress_callback) as p_file:
+            with httpx.Client(timeout=httpx.Timeout(connect=30.0, read=600.0, write=600.0, pool=30.0)) as client:
                 up_res = client.post(
                     upload_url,
-                    files={"file": (os.path.basename(video_path), p_file, "video/mp4")}
+                    files={"file": (os.path.basename(upload_file_path), p_file, "video/mp4")}
                 )
 
         if up_res.status_code != 200:
@@ -187,7 +296,7 @@ def upload_video_to_dailymotion(
         logging.info(f"✅ Arquivo enviado para Dailymotion com sucesso! URL do arquivo: {uploaded_file_url[:60]}")
 
         # 4. Criação do Vídeo sob o perfil
-        create_url = DM_PROFILES_VIDEOS_URL.format(profile_id=profile_id)
+        create_url = DM_PROFILES_VIDEOS_URL.format(profile_id=effective_profile_id)
         payload = {
             "title": title[:255],
             "description": description[:3000] if description else title,
@@ -229,3 +338,12 @@ def upload_video_to_dailymotion(
     except Exception as e:
         logging.error(f"Erro crítico no upload Dailymotion: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
+
+    finally:
+        if is_temp and os.path.exists(upload_file_path):
+            try:
+                os.remove(upload_file_path)
+                logging.info(f"🧹 Arquivo temporário adaptado excluído: {upload_file_path}")
+            except Exception as e_del:
+                logging.debug(f"Aviso ao remover temp: {e_del}")
+
