@@ -49,7 +49,9 @@ from src.torrent_downloader import (
     split_video_if_needed,
     extract_torrent_display_name,
     find_video_files,
-    extract_video_metadata_and_thumb
+    extract_video_metadata_and_thumb,
+    embed_subtitles_and_prepare_stream,
+    find_subtitle_files
 )
 
 import urllib.parse
@@ -198,10 +200,11 @@ async def execute_torrent_to_vip_pipeline(
     chat_id: int,
     message_id: int,
     magnet_link: str,
-    caption: str = ""
+    caption: str = "",
+    subtitle_path: Optional[str] = None
 ):
     """
-    Orquestrador de Download de Torrent + Divisão (> 4GB/2GB) + Upload MTProto para o Canal VIP.
+    Orquestrador de Download de Torrent + Legendas + Divisão (> 4GB/2GB) + Upload MTProto para o Canal VIP.
     """
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     timestamp = int(time.time())
@@ -255,6 +258,14 @@ async def execute_torrent_to_vip_pipeline(
 
     # 3. Seleciona o vídeo principal (maior arquivo de vídeo)
     main_video = videos[0]
+
+    # 3.1 Embuti legenda externa/manual ou detectada na pasta e otimiza para streaming (+faststart)
+    sub_to_use = subtitle_path or context.user_data.get("custom_subtitle_path") if hasattr(context, "user_data") else subtitle_path
+    try:
+        main_video, is_temp_remux = await embed_subtitles_and_prepare_stream(main_video, sub_to_use)
+    except Exception as sub_err:
+        logging.warning(f"Aviso ao preparar legenda/streaming no torrent: {sub_err}")
+
     file_size_mb = os.path.getsize(main_video) / (1024 * 1024)
     logging.info(f"🎬 Vídeo principal selecionado: {main_video} ({file_size_mb:.1f} MB)")
 
@@ -424,10 +435,10 @@ def build_sales_link(movie_title: str = None) -> str:
 STATE_SEARCH_MOVIE, STATE_SELECT_MOVIE, STATE_SELECT_AUDIO, STATE_SELECT_IMAGES, STATE_PREVIEW_POST, STATE_EDIT_COPY = range(6)
 
 # Estados da Conversa para Postar Vídeo no Canal VIP
-STATE_RECEIVE_VIDEO, STATE_CONFIRM_VIDEO_TITLE, STATE_EDIT_VIP_TITLE = range(6, 9)
+STATE_RECEIVE_VIDEO, STATE_CONFIRM_VIDEO_TITLE, STATE_EDIT_VIP_TITLE, STATE_WAIT_VIP_SUBTITLE = range(6, 10)
 
 # Estados da Conversa para Produzir Filme no Pipeline
-STATE_PRODUCE_CONFIRM, STATE_PRODUCE_INPUT_TITLE, STATE_PRODUCE_SELECT_MOVIE = range(9, 12)
+STATE_PRODUCE_CONFIRM, STATE_PRODUCE_INPUT_TITLE, STATE_PRODUCE_SELECT_MOVIE = range(10, 13)
 
 # Estados da Conversa para Thumbnail, Guia, YouTube, Dailymotion, Simultâneo e Torrent VIP
 (
@@ -451,8 +462,9 @@ STATE_PRODUCE_CONFIRM, STATE_PRODUCE_INPUT_TITLE, STATE_PRODUCE_SELECT_MOVIE = r
     STATE_SIMUL_CONFIRM_UPLOAD,
     STATE_TORRENT_INPUT,
     STATE_TORRENT_CONFIRM_TITLE,
-    STATE_TORRENT_EDIT_TITLE
-) = range(12, 33)
+    STATE_TORRENT_EDIT_TITLE,
+    STATE_TORRENT_WAIT_SUBTITLE
+) = range(13, 35)
 
 
 
@@ -975,19 +987,77 @@ async def handle_receive_video(update: Update, context: ContextTypes.DEFAULT_TYP
         return STATE_RECEIVE_VIDEO
 
     context.user_data["vip_video_caption"] = caption
+    context.user_data["custom_subtitle_path"] = None
 
     keyboard = [
-        [InlineKeyboardButton("✅ Manter Título/Legenda Original", callback_data="keep_vip_title")],
+        [InlineKeyboardButton("🚀 Publicar Direto no VIP", callback_data="keep_vip_title")],
+        [InlineKeyboardButton("📝 Enviar Legenda (.srt / .ass)", callback_data="add_vip_subtitle")],
         [InlineKeyboardButton("✏️ Editar Título/Legenda", callback_data="edit_vip_title")],
         [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
     ]
 
     await update.message.reply_text(
-        f"📹 **Vídeo / Link / Torrent Recebido!**\n\n"
-        f"Legenda detectada:\n_{caption if caption else '(Sem legenda / Usar formato do post)'}_\n\n"
+        f"📹 <b>Vídeo / Link / Torrent Recebido!</b>\n\n"
+        f"🎬 <b>Texto/Legenda Detectada:</b>\n<i>{caption if caption else '(Sem texto adicional / Padrão)'}</i>\n\n"
         f"Escolha o que deseja fazer:",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown"
+        parse_mode="HTML"
+    )
+    return STATE_CONFIRM_VIDEO_TITLE
+
+async def handle_add_vip_subtitle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Pede para o usuário enviar o arquivo de legenda (.srt ou .ass)."""
+    query = update.callback_query
+    await query.answer()
+    text = (
+        "📝 <b>Envio de Legenda Manual (.srt / .ass)</b>\n\n"
+        "Envie o <b>arquivo de legenda (.srt ou .ass)</b> no chat para embutirmos automaticamente no filme antes da postagem no VIP:"
+    )
+    await query.edit_message_text(text, parse_mode="HTML")
+    return STATE_WAIT_VIP_SUBTITLE
+
+async def handle_receive_vip_subtitle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe o arquivo de legenda e confirma com o usuário."""
+    doc = update.message.document
+    if not doc:
+        txt = update.message.text
+        if txt and ("-->" in txt or "[Events]" in txt):
+            temp_dir = os.path.join(os.path.dirname(__file__), "..", "temp_subtitles")
+            os.makedirs(temp_dir, exist_ok=True)
+            sub_path = os.path.join(temp_dir, f"sub_{int(time.time())}.srt")
+            with open(sub_path, "w", encoding="utf-8") as sf:
+                sf.write(txt)
+            context.user_data["custom_subtitle_path"] = sub_path
+            sub_name = "legenda_manual.srt"
+        else:
+            await update.message.reply_text("❌ Por favor, envie um arquivo de documento (.srt ou .ass) ou o texto da legenda.")
+            return STATE_WAIT_VIP_SUBTITLE
+    else:
+        file_name = doc.file_name or "legenda.srt"
+        temp_dir = os.path.join(os.path.dirname(__file__), "..", "temp_subtitles")
+        os.makedirs(temp_dir, exist_ok=True)
+        sub_path = os.path.join(temp_dir, f"sub_{int(time.time())}_{file_name}")
+        file_obj = await doc.get_file()
+        await file_obj.download_to_drive(sub_path)
+        context.user_data["custom_subtitle_path"] = sub_path
+        sub_name = file_name
+
+    caption = context.user_data.get("vip_video_caption", "")
+    keyboard = [
+        [InlineKeyboardButton("🚀 Iniciar e Publicar com Legenda", callback_data="keep_vip_title")],
+        [InlineKeyboardButton("📝 Trocar Legenda", callback_data="add_vip_subtitle")],
+        [InlineKeyboardButton("✏️ Editar Título/Legenda", callback_data="edit_vip_title")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
+    ]
+
+    await update.message.reply_text(
+        f"✅ <b>Legenda vinculada com sucesso!</b>\n\n"
+        f"📄 <b>Arquivo:</b> <code>{sub_name}</code>\n"
+        f"🎬 <b>Título/Texto da Postagem:</b>\n<i>{caption if caption else '(Sem título formatado)'}</i>\n\n"
+        f"A legenda será embutida como faixa oficial em Português no player do Telegram mantendo todos os áudios originais.\n"
+        f"Clique no botão abaixo para prosseguir com a publicação:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="HTML"
     )
     return STATE_CONFIRM_VIDEO_TITLE
 
@@ -995,7 +1065,7 @@ async def handle_edit_vip_title_start(update: Update, context: ContextTypes.DEFA
     """Pede para o usuário enviar a nova legenda/título para o vídeo no VIP."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("✏️ **Envie o novo texto/legenda para a postagem no Canal VIP:**", parse_mode="Markdown")
+    await query.edit_message_text("✏️ <b>Envie o novo texto/legenda para a postagem no Canal VIP:</b>", parse_mode="HTML")
     return STATE_EDIT_VIP_TITLE
 
 async def handle_edit_vip_title_receive(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1005,15 +1075,16 @@ async def handle_edit_vip_title_receive(update: Update, context: ContextTypes.DE
 
     keyboard = [
         [InlineKeyboardButton("🚀 Publicar Agora no Canal VIP", callback_data="keep_vip_title")],
+        [InlineKeyboardButton("📝 Enviar Legenda (.srt / .ass)", callback_data="add_vip_subtitle")],
         [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
     ]
 
     await update.message.reply_text(
-        f"📹 **Legenda Atualizada!**\n\n"
-        f"Nova legenda:\n_{new_caption}_\n\n"
+        f"📹 <b>Texto da Postagem Atualizado!</b>\n\n"
+        f"Novo texto:\n<i>{new_caption}</i>\n\n"
         f"Clique abaixo para publicar no Canal VIP:",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     return STATE_CONFIRM_VIDEO_TITLE
 
@@ -1025,6 +1096,7 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
 
     torrent_magnet = context.user_data.get("torrent_magnet")
     caption = context.user_data.get("vip_video_caption", "")
+    custom_sub = context.user_data.get("custom_subtitle_path")
 
     # Se for um link magnet recebido no menu VIP
     if torrent_magnet:
@@ -1034,7 +1106,8 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                 chat_id=query.message.chat_id,
                 message_id=query.message.message_id,
                 magnet_link=torrent_magnet,
-                caption=caption
+                caption=caption,
+                subtitle_path=custom_sub
             )
         )
         await context.bot.send_message(
@@ -1045,7 +1118,7 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
         )
         return ConversationHandler.END
 
-    await query.edit_message_text("⚡ **Publicando vídeo no Canal VIP em alta velocidade via Telethon...**", parse_mode="Markdown")
+    await query.edit_message_text("⚡ <b>Publicando vídeo no Canal VIP em alta velocidade via Telethon...</b>", parse_mode="HTML")
 
     video_file_id = context.user_data.get("vip_video_file_id")
     video_link = context.user_data.get("vip_video_link")
@@ -1064,6 +1137,7 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
         try:
             from telethon import TelegramClient
             from telethon.sessions import StringSession
+            from telethon.tl.types import DocumentAttributeVideo
             logging.info("⚡ Iniciando conexão Telethon para postagem VIP...")
             if sess_str:
                 client = TelegramClient(StringSession(sess_str), int(api_id), api_hash)
@@ -1101,89 +1175,100 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                             error_reason = f"Erro ao acessar canal de origem: {msg_err2}"
 
                     if orig_msg and orig_msg.media:
-                        logging.info("🎥 Mídia localizada na mensagem de origem! Iniciando envio via Telethon...")
-                        try:
-                            # 1. Tenta envio direto via servidor com barra de progresso
-                            tracker_up = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "🚀 Enviando Vídeo para o Canal VIP")
-                            await client.send_file(chat_entity, orig_msg.media, caption=caption if caption else orig_msg.text, progress_callback=tracker_up.callback)
-                            published_via_telethon = True
-                            logging.info("✅ Vídeo enviado via servidor Telethon com sucesso!")
-                        except Exception as send_err:
-                            # 2. Se o canal tiver Proteção de Conteúdo (Content Protection/noforwards) ativada pelo dono:
-                            err_msg_str = str(send_err).lower()
-                            if "protected" in err_msg_str or "noforwards" in err_msg_str or "restricted" in err_msg_str or "forward" in err_msg_str:
-                                logging.info("🔒 Canal protegido contra cópia detectado. Baixando mídia temporariamente para re-upload no VIP...")
-                                temp_dir = os.path.join(os.path.dirname(__file__), "..", "temp_vip_downloads")
-                                os.makedirs(temp_dir, exist_ok=True)
-                                
-                                tracker_down = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "⏬ Baixando Vídeo do Canal de Origem")
-                                downloaded_path = await client.download_media(orig_msg, file=temp_dir, progress_callback=tracker_down.callback)
+                        logging.info("🎥 Mídia localizada na mensagem de origem! Iniciando processamento...")
+                        
+                        # Se temos legenda customizada ou precisamos garantir metadados/capa, baixamos temporariamente
+                        temp_dir = os.path.join(os.path.dirname(__file__), "..", "temp_vip_downloads")
+                        os.makedirs(temp_dir, exist_ok=True)
+                        
+                        tracker_down = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "⏬ Baixando Vídeo do Canal de Origem")
+                        downloaded_path = await client.download_media(orig_msg, file=temp_dir, progress_callback=tracker_down.callback)
 
-                                if downloaded_path and os.path.exists(downloaded_path):
-                                    file_size_mb = os.path.getsize(downloaded_path) / (1024 * 1024)
-                                    base_caption = caption if caption else (orig_msg.text if orig_msg.text else "Vídeo VIP")
+                        if downloaded_path and os.path.exists(downloaded_path):
+                            # Embuti legenda se fornecida
+                            if custom_sub and os.path.exists(custom_sub):
+                                logging.info(f"⚡ Embutindo legenda manual no vídeo do canal protegido: {custom_sub}")
+                                downloaded_path, _ = await embed_subtitles_and_prepare_stream(downloaded_path, custom_sub)
+                            elif downloaded_path.lower().endswith(".mkv"):
+                                downloaded_path, _ = await embed_subtitles_and_prepare_stream(downloaded_path, None)
 
-                                    if file_size_mb > 2000:
-                                        num_parts = 3 if file_size_mb > 4000 else 2
-                                        logging.info(f"📦 Arquivo de {file_size_mb:.1f} MB excede 2000 MB. Dividindo em {num_parts} partes iguais via FFmpeg (-c copy)...")
-                                        
-                                        cmd_dur = [
-                                            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-                                            "-of", "default=noprint_wrappers=1:nokey=1", downloaded_path
-                                        ]
-                                        proc_dur = await asyncio.create_subprocess_exec(*cmd_dur, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                                        out_dur, _ = await proc_dur.communicate()
+                            file_size_mb = os.path.getsize(downloaded_path) / (1024 * 1024)
+                            base_caption = caption if caption else (orig_msg.text if orig_msg.text else "Vídeo VIP")
+
+                            # Se o arquivo for maior que 2000 MB, divide mantendo capa e duração em cada parte
+                            if file_size_mb > 2000:
+                                parts = await split_video_if_needed(downloaded_path, max_size_mb=2000.0)
+                                for p_info in parts:
+                                    p_idx = p_info["part_index"]
+                                    p_total = p_info["total_parts"]
+                                    p_path = p_info["path"]
+                                    part_caption = f"🎬 <b>{base_caption}</b>\n\n📌 <b>Parte {p_idx} de {p_total}</b>"
+                                    
+                                    # Extrai metadados completos (duração, resolução e thumbnail JPEG)
+                                    meta = await extract_video_metadata_and_thumb(p_path)
+                                    video_attrs = [
+                                        DocumentAttributeVideo(
+                                            duration=int(meta.get("duration", 1)),
+                                            w=int(meta.get("width", 1280)),
+                                            h=int(meta.get("height", 720)),
+                                            supports_streaming=True
+                                        )
+                                    ]
+                                    tracker_reup = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, f"🚀 Enviando Parte {p_idx}/{p_total} para o Canal VIP")
+                                    await client.send_file(
+                                        chat_entity,
+                                        p_path,
+                                        caption=part_caption,
+                                        thumb=meta.get("thumb_path"),
+                                        attributes=video_attrs,
+                                        progress_callback=tracker_reup.callback,
+                                        supports_streaming=True,
+                                        parse_mode="HTML"
+                                    )
+                                    if meta.get("thumb_path") and os.path.exists(meta.get("thumb_path")):
                                         try:
-                                            duration = float(out_dur.decode().strip())
-                                        except Exception:
-                                            duration = 7200.0
-
-                                        part_duration = duration / num_parts
-                                        split_parts = []
-
-                                        ext = os.path.splitext(downloaded_path)[1]
-                                        if not ext:
-                                            ext = ".mkv"
-
-                                        for i in range(num_parts):
-                                            start_t = i * part_duration
-                                            out_p = downloaded_path.rsplit('.', 1)[0] + f"_parte_{i+1}_de_{num_parts}{ext}"
-                                            cmd_split = [
-                                                "ffmpeg", "-y", "-ss", str(start_t), "-i", downloaded_path,
-                                                "-t", str(part_duration), "-c", "copy", out_p
-                                            ]
-
-                                            proc_sp = await asyncio.create_subprocess_exec(*cmd_split, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                                            await proc_sp.communicate()
-                                            if os.path.exists(out_p) and os.path.getsize(out_p) > 0:
-                                                split_parts.append((i+1, num_parts, out_p))
-
-                                        for p_idx, p_total, p_path in split_parts:
-                                            part_caption = f"{base_caption}\n\n📌 **Parte {p_idx} de {p_total}**"
-                                            tracker_reup = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, f"🚀 Enviando Parte {p_idx}/{p_total} para o Canal VIP")
-                                            await client.send_file(chat_entity, p_path, caption=part_caption, progress_callback=tracker_reup.callback, supports_streaming=True)
-                                            try:
-                                                os.remove(p_path)
-                                            except Exception:
-                                                pass
-                                        published_via_telethon = True
-                                        try:
-                                            os.remove(downloaded_path)
+                                            os.remove(meta.get("thumb_path"))
                                         except Exception:
                                             pass
-                                    else:
-                                        tracker_reup = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "🚀 Enviando Vídeo para o Canal VIP")
-                                        await client.send_file(chat_entity, downloaded_path, caption=base_caption, progress_callback=tracker_reup.callback, supports_streaming=True)
-                                        published_via_telethon = True
-                                        try:
-                                            os.remove(downloaded_path)
-                                        except Exception:
-                                            pass
-
-                                else:
-                                    error_reason = "Não foi possível baixar a mídia do canal protegido."
+                                    try:
+                                        os.remove(p_path)
+                                    except Exception:
+                                        pass
+                                published_via_telethon = True
                             else:
-                                error_reason = f"Erro ao enviar mídia: {send_err}"
+                                meta = await extract_video_metadata_and_thumb(downloaded_path)
+                                video_attrs = [
+                                    DocumentAttributeVideo(
+                                        duration=int(meta.get("duration", 1)),
+                                        w=int(meta.get("width", 1280)),
+                                        h=int(meta.get("height", 720)),
+                                        supports_streaming=True
+                                    )
+                                ]
+                                tracker_reup = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "🚀 Enviando Vídeo para o Canal VIP")
+                                await client.send_file(
+                                    chat_entity,
+                                    downloaded_path,
+                                    caption=f"🎬 <b>{base_caption}</b>",
+                                    thumb=meta.get("thumb_path"),
+                                    attributes=video_attrs,
+                                    progress_callback=tracker_reup.callback,
+                                    supports_streaming=True,
+                                    parse_mode="HTML"
+                                )
+                                if meta.get("thumb_path") and os.path.exists(meta.get("thumb_path")):
+                                    try:
+                                        os.remove(meta.get("thumb_path"))
+                                    except Exception:
+                                        pass
+                                published_via_telethon = True
+
+                            try:
+                                os.remove(downloaded_path)
+                            except Exception:
+                                pass
+                        else:
+                            error_reason = "Não foi possível baixar a mídia do canal de origem."
                     else:
                         if not error_reason:
                             error_reason = "A mensagem no link de origem não contém mídia/vídeo ou a conta do Telethon não faz parte do canal privado de origem."
@@ -1232,32 +1317,34 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
 
     if published_via_telethon:
         try:
-            limpar_arquivos_locais_temporarios(["temp", "output", "temp_vip_downloads"])
+            limpar_arquivos_locais_temporarios(["temp", "output", "temp_vip_downloads", "temp_subtitles"])
             logging.info("🧹 Mídias temporárias e pasta temp_vip_downloads excluídas da instância após postagem no VIP.")
         except Exception as e_clean:
             logging.warning(f"Aviso ao limpar mídias VIP: {e_clean}")
 
         await query.edit_message_text(
-            f"🚀 **VÍDEO PUBLICADO COM SUCESSO NO CANAL VIP `{TELEGRAM_VIP_CHANNEL_ID}`!**",
-            parse_mode="Markdown"
+            f"🚀 <b>VÍDEO PUBLICADO COM SUCESSO NO CANAL VIP <code>{TELEGRAM_VIP_CHANNEL_ID}</code>!</b>",
+            parse_mode="HTML"
         )
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text="📱 **Menu Principal:**",
-            reply_markup=get_main_keyboard()
+            text="📱 <b>Menu Principal:</b>",
+            reply_markup=get_main_keyboard(),
+            parse_mode="HTML"
         )
     else:
         msg_err = error_reason if error_reason else "O link/mensagem enviada não contém um arquivo de vídeo válido."
         await query.edit_message_text(
-            f"❌ **Não foi possível publicar o vídeo no Canal VIP:**\n\n"
-            f"⚠️ _{msg_err}_\n\n"
-            f"💡 **Dica:** Encaminhe o arquivo do vídeo **diretamente** para este bot admin, ou certifique-se de que a conta do bot faz parte do canal privado de origem!",
-            parse_mode="Markdown"
+            f"❌ <b>Não foi possível publicar o vídeo no Canal VIP:</b>\n\n"
+            f"⚠️ <i>{msg_err}</i>\n\n"
+            f"💡 <b>Dica:</b> Encaminhe o arquivo do vídeo <b>diretamente</b> para este bot admin, ou certifique-se de que a conta do bot faz parte do canal privado de origem!",
+            parse_mode="HTML"
         )
         await context.bot.send_message(
             chat_id=query.message.chat_id,
-            text="📱 **Menu Principal:**",
-            reply_markup=get_main_keyboard()
+            text="📱 <b>Menu Principal:</b>",
+            reply_markup=get_main_keyboard(),
+            parse_mode="HTML"
         )
 
     return ConversationHandler.END
@@ -1270,12 +1357,12 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
 async def start_torrent_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Pede para o usuário enviar o link Magnet Torrent."""
     await update.message.reply_text(
-        "🧲 **Baixar Torrent (Magnet Link) para o Canal VIP**\n\n"
-        "Envie o **link Magnet Torrent** do filme que você deseja baixar na instância e publicar no VIP:\n\n"
-        "💡 _Exemplo:_ `magnet:?xt=urn:btih:...`\n"
-        "⚡ _O download será executado em velocidade máxima com Aria2c + Trackers, divisão automática (> 2GB/4GB) e status em tempo real!_",
+        "🧲 <b>Baixar Torrent (Magnet Link) para o Canal VIP</b>\n\n"
+        "Envie o <b>link Magnet Torrent</b> do filme que você deseja baixar na instância e publicar no VIP:\n\n"
+        "💡 <i>Exemplo:</i> <code>magnet:?xt=urn:btih:...</code>\n"
+        "⚡ <i>O download será executado em velocidade máxima com Aria2c + Trackers, suporte a legendas manuais, divisão automática (> 2GB/4GB) e status em tempo real!</i>",
         reply_markup=ReplyKeyboardRemove(),
-        parse_mode="Markdown"
+        parse_mode="HTML"
     )
     return STATE_TORRENT_INPUT
 
@@ -1285,10 +1372,10 @@ async def handle_receive_torrent_link(update: Update, context: ContextTypes.DEFA
     
     if not ("magnet:?" in msg_text and "xt=urn:btih:" in msg_text.lower()):
         await update.message.reply_text(
-            "❌ **Link Magnet Inválido!**\n\n"
+            "❌ <b>Link Magnet Inválido!</b>\n\n"
             "Por favor, envie um link válido no formato:\n"
-            "`magnet:?xt=urn:btih:...`",
-            parse_mode="Markdown"
+            "<code>magnet:?xt=urn:btih:...</code>",
+            parse_mode="HTML"
         )
         return STATE_TORRENT_INPUT
 
@@ -1301,17 +1388,75 @@ async def handle_receive_torrent_link(update: Update, context: ContextTypes.DEFA
 
     context.user_data["torrent_magnet"] = magnet_link
     context.user_data["torrent_caption"] = display_title
+    context.user_data["custom_subtitle_path"] = None
 
     keyboard = [
         [InlineKeyboardButton("🚀 Iniciar Download e Envio VIP", callback_data="start_torrent_process")],
+        [InlineKeyboardButton("📝 Enviar Legenda (.srt / .ass)", callback_data="add_torrent_subtitle")],
         [InlineKeyboardButton("✏️ Editar Título/Legenda", callback_data="edit_torrent_title")],
         [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
     ]
 
     await update.message.reply_text(
-        f"🧲 **Magnet Link Recebido com Sucesso!**\n\n"
-        f"🎬 **Título detectado:** <code>{display_title}</code>\n\n"
+        f"🧲 <b>Magnet Link Recebido com Sucesso!</b>\n\n"
+        f"🎬 <b>Título detectado:</b> <code>{display_title}</code>\n\n"
         f"Escolha o que deseja fazer:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="HTML"
+    )
+    return STATE_TORRENT_CONFIRM_TITLE
+
+async def handle_add_torrent_subtitle_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Pede para o usuário enviar o arquivo de legenda para o torrent."""
+    query = update.callback_query
+    await query.answer()
+    text = (
+        "📝 <b>Envio de Legenda Manual para o Torrent</b>\n\n"
+        "Envie o <b>arquivo de legenda (.srt ou .ass)</b> no chat para embutirmos automaticamente no filme baixado:"
+    )
+    await query.edit_message_text(text, parse_mode="HTML")
+    return STATE_TORRENT_WAIT_SUBTITLE
+
+async def handle_receive_torrent_subtitle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Recebe a legenda para o torrent e confirma."""
+    doc = update.message.document
+    if not doc:
+        txt = update.message.text
+        if txt and ("-->" in txt or "[Events]" in txt):
+            temp_dir = os.path.join(os.path.dirname(__file__), "..", "temp_subtitles")
+            os.makedirs(temp_dir, exist_ok=True)
+            sub_path = os.path.join(temp_dir, f"sub_torrent_{int(time.time())}.srt")
+            with open(sub_path, "w", encoding="utf-8") as sf:
+                sf.write(txt)
+            context.user_data["custom_subtitle_path"] = sub_path
+            sub_name = "legenda_torrent.srt"
+        else:
+            await update.message.reply_text("❌ Por favor, envie um arquivo de documento (.srt ou .ass) ou o texto da legenda.")
+            return STATE_TORRENT_WAIT_SUBTITLE
+    else:
+        file_name = doc.file_name or "legenda.srt"
+        temp_dir = os.path.join(os.path.dirname(__file__), "..", "temp_subtitles")
+        os.makedirs(temp_dir, exist_ok=True)
+        sub_path = os.path.join(temp_dir, f"sub_torrent_{int(time.time())}_{file_name}")
+        file_obj = await doc.get_file()
+        await file_obj.download_to_drive(sub_path)
+        context.user_data["custom_subtitle_path"] = sub_path
+        sub_name = file_name
+
+    display_title = context.user_data.get("torrent_caption", "Filme")
+    keyboard = [
+        [InlineKeyboardButton("🚀 Iniciar Download e Enviar com Legenda", callback_data="start_torrent_process")],
+        [InlineKeyboardButton("📝 Trocar Legenda", callback_data="add_torrent_subtitle")],
+        [InlineKeyboardButton("✏️ Editar Título/Legenda", callback_data="edit_torrent_title")],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
+    ]
+
+    await update.message.reply_text(
+        f"✅ <b>Legenda vinculada ao Torrent com sucesso!</b>\n\n"
+        f"📄 <b>Arquivo:</b> <code>{sub_name}</code>\n"
+        f"🎬 <b>Título:</b> <code>{display_title}</code>\n\n"
+        f"O robô baixará o filme e embutirá a legenda automaticamente antes de postar no VIP.\n"
+        f"Clique abaixo para iniciar:",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="HTML"
     )
@@ -1322,8 +1467,8 @@ async def handle_edit_torrent_title_start(update: Update, context: ContextTypes.
     query = update.callback_query
     await query.answer()
     await query.edit_message_text(
-        "✏️ **Envie o novo título/legenda para a postagem no Canal VIP:**",
-        parse_mode="Markdown"
+        "✏️ <b>Envie o novo título/legenda para a postagem no Canal VIP:</b>",
+        parse_mode="HTML"
     )
     return STATE_TORRENT_EDIT_TITLE
 
@@ -1334,11 +1479,12 @@ async def handle_edit_torrent_title_receive(update: Update, context: ContextType
 
     keyboard = [
         [InlineKeyboardButton("🚀 Iniciar Download e Envio VIP", callback_data="start_torrent_process")],
+        [InlineKeyboardButton("📝 Enviar Legenda (.srt / .ass)", callback_data="add_torrent_subtitle")],
         [InlineKeyboardButton("❌ Cancelar", callback_data="cancel_post")]
     ]
 
     await update.message.reply_text(
-        f"🎬 **Título do Torrent Atualizado!**\n\n"
+        f"🎬 <b>Título do Torrent Atualizado!</b>\n\n"
         f"Novo título:\n<code>{new_caption}</code>\n\n"
         f"Clique abaixo para iniciar o download e postagem no Canal VIP:",
         reply_markup=InlineKeyboardMarkup(keyboard),
@@ -1353,9 +1499,10 @@ async def handle_execute_torrent_callback(update: Update, context: ContextTypes.
 
     magnet_link = context.user_data.get("torrent_magnet")
     caption = context.user_data.get("torrent_caption", "")
+    custom_sub = context.user_data.get("custom_subtitle_path")
 
     if not magnet_link:
-        await query.edit_message_text("❌ Nenhum magnet link foi fornecido.", parse_mode="Markdown")
+        await query.edit_message_text("❌ Nenhum magnet link foi fornecido.", parse_mode="HTML")
         return ConversationHandler.END
 
     # Dispara a tarefa em segundo plano e libera a conversa/bot imediatamente para múltiplas ações concorrentes
@@ -1365,7 +1512,8 @@ async def handle_execute_torrent_callback(update: Update, context: ContextTypes.
             chat_id=query.message.chat_id,
             message_id=query.message.message_id,
             magnet_link=magnet_link,
-            caption=caption
+            caption=caption,
+            subtitle_path=custom_sub
         )
     )
 
@@ -2257,9 +2405,11 @@ def create_telegram_bot_app() -> Application:
             STATE_RECEIVE_VIDEO: [MessageHandler(filters.ALL & ~filters.COMMAND, handle_receive_video)],
             STATE_CONFIRM_VIDEO_TITLE: [
                 CallbackQueryHandler(handle_publish_vip_video, pattern="^keep_vip_title$"),
+                CallbackQueryHandler(handle_add_vip_subtitle_start, pattern="^add_vip_subtitle$"),
                 CallbackQueryHandler(handle_edit_vip_title_start, pattern="^edit_vip_title$"),
                 CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^cancel_post$")
             ],
+            STATE_WAIT_VIP_SUBTITLE: [MessageHandler(filters.ALL & ~filters.COMMAND, handle_receive_vip_subtitle_file)],
             STATE_EDIT_VIP_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_vip_title_receive)]
         },
         fallbacks=[
@@ -2283,9 +2433,11 @@ def create_telegram_bot_app() -> Application:
             STATE_TORRENT_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_receive_torrent_link)],
             STATE_TORRENT_CONFIRM_TITLE: [
                 CallbackQueryHandler(handle_execute_torrent_callback, pattern="^start_torrent_process$"),
+                CallbackQueryHandler(handle_add_torrent_subtitle_start, pattern="^add_torrent_subtitle$"),
                 CallbackQueryHandler(handle_edit_torrent_title_start, pattern="^edit_torrent_title$"),
                 CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^cancel_post$")
             ],
+            STATE_TORRENT_WAIT_SUBTITLE: [MessageHandler(filters.ALL & ~filters.COMMAND, handle_receive_torrent_subtitle_file)],
             STATE_TORRENT_EDIT_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_edit_torrent_title_receive)]
         },
         fallbacks=[

@@ -39,6 +39,7 @@ PUBLIC_TRACKERS = [
 ]
 
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".avi", ".mov", ".webm", ".flv", ".ts", ".m4v", ".wmv"}
+SUBTITLE_EXTENSIONS = {".srt", ".ass", ".ssa", ".vtt"}
 
 
 def ensure_aria2_binary() -> str:
@@ -211,6 +212,106 @@ def find_video_files(directory: str) -> List[str]:
     # Ordena pelo tamanho decrescente
     video_files.sort(key=lambda x: x[1], reverse=True)
     return [item[0] for item in video_files]
+
+
+def find_subtitle_files(directory: str) -> List[str]:
+    """
+    Varre recursivamente o diretório fornecido e retorna todos os arquivos de legenda (.srt, .ass, etc.).
+    """
+    sub_files = []
+    if os.path.isfile(directory):
+        ext = os.path.splitext(directory)[1].lower()
+        if ext in SUBTITLE_EXTENSIONS:
+            return [directory]
+        return []
+
+    for root, _, files in os.walk(directory):
+        for f in files:
+            ext = os.path.splitext(f)[1].lower()
+            if ext in SUBTITLE_EXTENSIONS:
+                full_p = os.path.join(root, f)
+                sub_files.append(full_p)
+    return sub_files
+
+
+async def embed_subtitles_and_prepare_stream(video_path: str, subtitle_path: Optional[str] = None) -> tuple[str, bool]:
+    """
+    Embuti legenda (softsub) no vídeo e garante contêiner MP4 otimizado para streaming instantâneo
+    no player do Telegram (+faststart).
+    
+    1. Preserva 100% das faixas de áudio originais (multi-áudio intacto).
+    2. Insere a legenda externa como faixa selecionável nativa (mov_text) em ~2-3 segundos com -c copy.
+    3. Se não houver legenda externa mas o diretório tiver arquivos .srt, detecta e insere automaticamente.
+    4. Aplica -movflags +faststart para início instantâneo de streaming.
+    
+    Retorna (caminho_final, is_temporario).
+    """
+    if not os.path.exists(video_path):
+        return video_path, False
+
+    # 1. Se nenhuma legenda foi passada, tenta encontrar automaticamente no diretório do vídeo
+    sub_file = subtitle_path
+    if not sub_file or not os.path.exists(sub_file):
+        parent_dir = os.path.dirname(video_path)
+        subs_found = find_subtitle_files(parent_dir)
+        if subs_found:
+            sub_file = subs_found[0]
+            logging.info(f"📝 Legenda detectada automaticamente na pasta: {sub_file}")
+
+    base_name, ext = os.path.splitext(video_path)
+    output_path = f"{base_name}_telegram.mp4"
+
+    if sub_file and os.path.exists(sub_file):
+        logging.info(f"⚡ Embutindo legenda '{os.path.basename(sub_file)}' no vídeo via FFmpeg Stream Copy...")
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-i", sub_file,
+            "-map", "0:v",
+            "-map", "0:a?",
+            "-map", "1:0",
+            "-c:v", "copy",
+            "-c:a", "copy",
+            "-c:s", "mov_text",
+            "-metadata:s:s:0", "language=por",
+            "-metadata:s:s:0", "title=Português",
+            "-movflags", "+faststart",
+            output_path
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await proc.communicate()
+            if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                logging.info(f"✅ Vídeo com legenda e streaming gerado com sucesso: {output_path}")
+                return output_path, True
+        except Exception as e:
+            logging.warning(f"Aviso ao embutir legenda no MP4: {e}. Mantendo arquivo original.")
+
+    # Se for MKV com legendas embutidas ou sem legenda externa, converte para MP4 preservando tudo
+    elif ext.lower() == ".mkv":
+        logging.info(f"⚡ Remuxando MKV para MP4 com suporte a streaming (+faststart)...")
+        cmd = [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-map", "0:v",
+            "-map", "0:a?",
+            "-map", "0:s?",
+            "-c:v", "copy",
+            "-c:a", "copy",
+            "-c:s", "mov_text",
+            "-movflags", "+faststart",
+            output_path
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await proc.communicate()
+            if proc.returncode == 0 and os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                logging.info(f"✅ MKV convertido para MP4 com sucesso: {output_path}")
+                return output_path, True
+        except Exception as e:
+            logging.warning(f"Aviso ao remuxar MKV para MP4: {e}. Mantendo arquivo original.")
+
+    return video_path, False
 
 
 async def download_torrent_magnet(
@@ -445,10 +546,13 @@ async def extract_video_metadata_and_thumb(video_path: str) -> Dict[str, Any]:
     except Exception as e:
         logging.warning(f"Aviso ao extrair metadados com ffprobe: {e}")
 
-    # 2. Gera a thumbnail JPEG da capa do vídeo no segundo 5 (ou 1)
+    if result["duration"] <= 0:
+        result["duration"] = 1
+
+    # 2. Gera a thumbnail JPEG da capa do vídeo no segundo 5 (ou 1, ou 0.1)
     base_name = os.path.splitext(video_path)[0]
     thumb_path = f"{base_name}_thumb.jpg"
-    seek_sec = "5" if result["duration"] > 10 else "1"
+    seek_sec = "5" if result["duration"] > 15 else ("1" if result["duration"] > 3 else "0.1")
     
     cmd_thumb = [
         "ffmpeg", "-y", "-ss", seek_sec, "-i", video_path,
@@ -464,6 +568,17 @@ async def extract_video_metadata_and_thumb(video_path: str) -> Dict[str, Any]:
         await proc_thumb.communicate()
         if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
             result["thumb_path"] = thumb_path
+        else:
+            # Fallback no segundo 0
+            cmd_thumb_fb = [
+                "ffmpeg", "-y", "-ss", "00:00:00", "-i", video_path,
+                "-vframes", "1", "-q:v", "2", "-vf", "scale=320:-1",
+                thumb_path
+            ]
+            proc_fb = await asyncio.create_subprocess_exec(*cmd_thumb_fb, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            await proc_fb.communicate()
+            if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
+                result["thumb_path"] = thumb_path
     except Exception as e:
         logging.warning(f"Aviso ao gerar thumbnail do vídeo: {e}")
 
