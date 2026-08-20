@@ -37,6 +37,11 @@ def get_dailymotion_credentials() -> tuple[str, str]:
     return client_id.strip().strip("\"'").strip(), client_secret.strip().strip("\"'").strip()
 
 
+def get_dailymotion_profile_id() -> str:
+    """Recupera o ID do canal oficial de destino (ex: x2dvwo7 para Tela Cheia Filmes)."""
+    return os.getenv("DAILYMOTION_CHANNEL_ID") or os.getenv("DAILYMOTION_PROFILE_ID") or "x2dvwo7"
+
+
 def extract_profile_id_from_token(token: str) -> str:
     """Extrai dinamicamente o sub (profile_id) do payload JWT do token Dailymotion."""
     try:
@@ -49,7 +54,7 @@ def extract_profile_id_from_token(token: str) -> str:
                 return str(sub)
     except Exception as e:
         logging.warning(f"Aviso ao extrair sub do token JWT: {e}")
-    return "x5yz68a"
+    return "x2dvwo7"
 
 
 def get_dailymotion_access_token(force_refresh: bool = False) -> str:
@@ -276,14 +281,14 @@ def upload_video_to_dailymotion(
     description: str = "",
     category: str = "tv",
     visibility: str = "public",
-    profile_id: str = "x5yz68a",
+    profile_id: Optional[str] = None,
     progress_callback: Optional[Callable[[float, int, int], None]] = None,
     status_callback: Optional[Callable[[str, Optional[float]], None]] = None
 ) -> dict:
     """
     Executa o pipeline completo de upload e publicação de um vídeo no Dailymotion:
     1. Adapta duração (< 2h) e tamanho (< 4GB) instantaneamente com FFmpeg e feedback em tempo real
-    2. Obtém token v2 e resolve profile_id dinâmico
+    2. Obtém token v2 e direciona para o canal oficial (x2dvwo7 - Tela Cheia Filmes)
     3. Cria sessão de upload
     4. Faz o upload streaming do arquivo com acompanhamento de progresso
     5. Cria e publica o objeto de vídeo no perfil do canal
@@ -297,9 +302,9 @@ def upload_video_to_dailymotion(
         file_size = os.path.getsize(upload_file_path)
         logging.info(f"🌐 Iniciando upload para Dailymotion: '{title}' ({file_size / (1024*1024):.1f} MB)...")
 
-        # 1. Autenticação & Profile ID
+        # 1. Autenticação & Profile ID oficial (x2dvwo7)
         token = get_dailymotion_access_token()
-        effective_profile_id = extract_profile_id_from_token(token) if (not profile_id or profile_id == "x5yz68a") else profile_id
+        effective_profile_id = profile_id or get_dailymotion_profile_id()
 
         # 2. Sessão de Upload
         session = create_upload_session(token)
