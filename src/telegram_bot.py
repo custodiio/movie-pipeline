@@ -2856,6 +2856,38 @@ async def handle_dailymotion_execute_upload_callback(update: Update, context: Co
         if loop and loop.is_running():
             asyncio.run_coroutine_threadsafe(_do_edit(), loop)
 
+    def dm_status_cb(status_text, pct=None):
+        nonlocal last_edit
+        now = time.time()
+        if now - last_edit < 2 and (pct is not None and pct < 100):
+            return
+        last_edit = now
+
+        if pct is not None:
+            filled = int(pct / 10)
+            bar = "█" * filled + "░" * (10 - filled)
+            text = (
+                f"⚙️ <b>PROCESSANDO VÍDEO PARA O DAILYMOTION...</b>\n\n"
+                f"🎬 <b>Filme:</b> {movie_title}\n"
+                f"📊 <b>Ajuste de Limites:</b> <code>[{bar}] {pct:.1f}%</code>\n\n"
+                f"ℹ️ <i>{status_text}</i>"
+            )
+        else:
+            text = (
+                f"⚙️ <b>PROCESSANDO VÍDEO PARA O DAILYMOTION...</b>\n\n"
+                f"🎬 <b>Filme:</b> {movie_title}\n\n"
+                f"ℹ️ <i>{status_text}</i>"
+            )
+
+        async def _do_edit():
+            try:
+                await status_msg.edit_text(text, parse_mode="HTML")
+            except Exception:
+                pass
+
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(_do_edit(), loop)
+
     def _do_dm_upload_thread():
         return upload_video_to_dailymotion(
             video_path=video_path,
@@ -2863,7 +2895,8 @@ async def handle_dailymotion_execute_upload_callback(update: Update, context: Co
             description=guide.get("description", ""),
             category="tv",
             visibility="public",
-            progress_callback=dm_progress_cb
+            progress_callback=dm_progress_cb,
+            status_callback=dm_status_cb
         )
 
     res = await asyncio.to_thread(_do_dm_upload_thread)
@@ -3008,24 +3041,29 @@ async def handle_simultaneous_execute_upload_callback(update: Update, context: C
     dm_pct = 0.0
     yt_done = False
     dm_done = False
+    dm_status_note = ""
     last_edit = 0.0
 
     def trigger_ui_update():
         nonlocal last_edit
         now = time.time()
-        if now - last_edit < 2.5 and not (yt_done and dm_done):
+        if now - last_edit < 2.0 and not (yt_done and dm_done):
             return
         last_edit = now
 
         bar_yt = "█" * int(yt_pct / 10) + "░" * (10 - int(yt_pct / 10))
         bar_dm = "█" * int(dm_pct / 10) + "░" * (10 - int(dm_pct / 10))
 
+        dm_line = f"🌐 <b>Dailymotion:</b> <code>[{bar_dm}] {dm_pct:.1f}%</code> {'✅ Concluído' if dm_done else '⏳ Enviando...'}"
+        if dm_status_note and not dm_done:
+            dm_line += f"\n   ↳ <i>{dm_status_note}</i>"
+
         text = (
             f"🚀 <b>POSTAGEM SIMULTÂNEA EM ANDAMENTO (PARALELO)...</b>\n\n"
             f"🎬 <b>Filme:</b> {movie_title}\n"
             f"📦 <b>Tamanho:</b> <code>{file_size_mb:.1f} MB</code>\n\n"
             f"📺 <b>YouTube:</b> <code>[{bar_yt}] {yt_pct:.1f}%</code> {'✅ Concluído' if yt_done else '⏳ Enviando...'}\n"
-            f"🌐 <b>Dailymotion:</b> <code>[{bar_dm}] {dm_pct:.1f}%</code> {'✅ Concluído' if dm_done else '⏳ Enviando...'}\n\n"
+            f"{dm_line}\n\n"
             f"⚡ <i>Saturando banda com uploads concorrentes de alta velocidade...</i>"
         )
 
@@ -3046,6 +3084,11 @@ async def handle_simultaneous_execute_upload_callback(update: Update, context: C
     def dm_progress_cb(pct, current_bytes, total_bytes):
         nonlocal dm_pct
         dm_pct = pct
+        trigger_ui_update()
+
+    def dm_status_cb(status_text, pct=None):
+        nonlocal dm_status_note
+        dm_status_note = status_text
         trigger_ui_update()
 
     def _worker_yt():
@@ -3071,7 +3114,8 @@ async def handle_simultaneous_execute_upload_callback(update: Update, context: C
             description=guide.get("description", ""),
             category="tv",
             visibility="public",
-            progress_callback=dm_progress_cb
+            progress_callback=dm_progress_cb,
+            status_callback=dm_status_cb
         )
         dm_done = True
         trigger_ui_update()

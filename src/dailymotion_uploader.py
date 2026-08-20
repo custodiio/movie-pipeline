@@ -126,13 +126,19 @@ def get_video_info(video_path: str) -> tuple[float, int]:
     return 0.0, os.path.getsize(video_path) if os.path.exists(video_path) else 0
 
 
-def adapt_video_for_dailymotion(video_path: str, max_duration_sec: int = 7190, max_size_mb: int = 3900) -> tuple[str, bool]:
+def adapt_video_for_dailymotion(
+    video_path: str,
+    max_duration_sec: int = 7190,
+    max_size_mb: int = 3900,
+    status_callback: Optional[Callable[[str, Optional[float]], None]] = None
+) -> tuple[str, bool]:
     """
     Garante que o vídeo respeite os limites estritos do Dailymotion Standard Creator:
     1. Duração máxima de 01:59:50 (limite oficial: 2 horas / 7200s).
     2. Tamanho máximo de 3.9 GB (limite oficial: 4.0 GB).
     
-    Executa corte instantâneo em 1-2 segundos via FFmpeg Stream Copy (-c copy).
+    Executa corte instantâneo em 1-2 segundos via FFmpeg Stream Copy (-c copy)
+    e informa o status em tempo real via status_callback.
     Retorna (caminho_do_video_final, is_arquivo_temporario).
     """
     if not os.path.exists(video_path):
@@ -149,6 +155,8 @@ def adapt_video_for_dailymotion(video_path: str, max_duration_sec: int = 7190, m
         base_name = os.path.basename(video_path)
         trimmed_path = os.path.join(dir_name, f"dm_trimmed_{base_name}")
         logging.info(f"✂️ Vídeo tem {dur/60:.1f} min (> 2h). Recortando instantaneamente para 01:59:50 com -c copy...")
+        if status_callback:
+            status_callback("✂️ Recortando duração para 01:59:50 (limite oficial de 2h do Dailymotion)...", None)
 
         cmd_trim = [
             "ffmpeg", "-y", "-ss", "00:00:00", "-i", video_path,
@@ -170,6 +178,8 @@ def adapt_video_for_dailymotion(video_path: str, max_duration_sec: int = 7190, m
         effective_dur = min(dur, max_duration_sec) if dur > 0 else 7190
         target_bitrate_kbps = max(1500, int((3700 * 8192) / effective_dur))
         logging.info(f"⚡ Ajustando bitrate para caber no limite de 4 GB ({target_bitrate_kbps} kbps)...")
+        if status_callback:
+            status_callback(f"⚡ Ajustando tamanho ({size_mb:.1f} MB -> < 4 GB)...", 0.0)
 
         cmd_comp = [
             "ffmpeg", "-y", "-i", current_path,
@@ -178,10 +188,30 @@ def adapt_video_for_dailymotion(video_path: str, max_duration_sec: int = 7190, m
             "-maxrate", f"{int(target_bitrate_kbps * 1.2)}k",
             "-bufsize", f"{target_bitrate_kbps * 2}k",
             "-c:a", "copy",
+            "-progress", "pipe:1",
+            "-nostats",
             compressed_path
         ]
-        res = subprocess.run(cmd_comp, capture_output=True, text=True)
-        if res.returncode == 0 and os.path.exists(compressed_path):
+        process = subprocess.Popen(cmd_comp, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        last_cb = 0.0
+        if process.stdout:
+            for line in process.stdout:
+                line = line.strip()
+                if line.startswith("out_time_us="):
+                    try:
+                        us = int(line.split("=")[1])
+                        sec = us / 1_000_000
+                        pct = min(100.0, (sec / effective_dur) * 100)
+                        now = time.time()
+                        if now - last_cb >= 2.0 or pct >= 100.0:
+                            last_cb = now
+                            if status_callback:
+                                status_callback(f"⚡ Otimizando tamanho para limite de 4 GB ({pct:.1f}%)...", pct)
+                    except Exception:
+                        pass
+        process.wait()
+
+        if process.returncode == 0 and os.path.exists(compressed_path):
             if is_temp and os.path.exists(current_path):
                 try:
                     os.remove(current_path)
@@ -247,11 +277,12 @@ def upload_video_to_dailymotion(
     category: str = "tv",
     visibility: str = "public",
     profile_id: str = "x5yz68a",
-    progress_callback: Optional[Callable[[float, int, int], None]] = None
+    progress_callback: Optional[Callable[[float, int, int], None]] = None,
+    status_callback: Optional[Callable[[str, Optional[float]], None]] = None
 ) -> dict:
     """
     Executa o pipeline completo de upload e publicação de um vídeo no Dailymotion:
-    1. Adapta duração (< 2h) e tamanho (< 4GB) instantaneamente com FFmpeg
+    1. Adapta duração (< 2h) e tamanho (< 4GB) instantaneamente com FFmpeg e feedback em tempo real
     2. Obtém token v2 e resolve profile_id dinâmico
     3. Cria sessão de upload
     4. Faz o upload streaming do arquivo com acompanhamento de progresso
@@ -260,7 +291,7 @@ def upload_video_to_dailymotion(
     if not os.path.exists(video_path):
         return {"success": False, "error": f"Arquivo de vídeo não encontrado: {video_path}"}
 
-    upload_file_path, is_temp = adapt_video_for_dailymotion(video_path)
+    upload_file_path, is_temp = adapt_video_for_dailymotion(video_path, status_callback=status_callback)
 
     try:
         file_size = os.path.getsize(upload_file_path)
