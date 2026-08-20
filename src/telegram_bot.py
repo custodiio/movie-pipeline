@@ -9,6 +9,7 @@ import json
 import logging
 import asyncio
 import requests
+from typing import Optional, List, Dict, Any, Callable
 
 from dotenv import load_dotenv
 
