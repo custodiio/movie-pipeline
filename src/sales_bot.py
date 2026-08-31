@@ -192,54 +192,136 @@ async def cancel_order_callback(update: Update, context: ContextTypes.DEFAULT_TY
     return STATE_IDLE
 
 
+DELIVERY_LOCK = asyncio.Lock()
+PROCESSED_IDENTIFIERS = set()
+
+
+async def generate_single_use_vip_invite(user_id: int, user_name: str, identifier: str) -> str:
+    """
+    Gera um link de convite exclusivo e de uso único estrito (member_limit=1, expire_date=24h)
+    para o Canal VIP, garantindo entrada individual e revogação automática pelo Telegram assim que o usuário entrar.
+    """
+    import time
+    from telegram import Bot
+
+    vip_channel = TELEGRAM_VIP_CHANNEL_ID
+    tokens_to_try = []
+
+    # 1. Prioriza o Bot Admin Oficial que possui permissões de Administrador confirmadas no Canal VIP
+    admin_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if admin_token:
+        tokens_to_try.append(("Bot Admin Oficial", admin_token))
+
+    # 2. Tenta também com o Bot de Vendas
+    sales_token = os.getenv("SALES_BOT_TOKEN")
+    if sales_token and sales_token != admin_token:
+        tokens_to_try.append(("Bot de Vendas", sales_token))
+
+    expire_time = int(time.time()) + 86400  # Link válido por 24 horas até a entrada
+    clean_name = f"PIX_{user_id}_{identifier[:6]}"[:32]
+
+    for bot_label, token in tokens_to_try:
+        try:
+            bot_instance = Bot(token)
+            link_obj = await bot_instance.create_chat_invite_link(
+                chat_id=vip_channel,
+                member_limit=1,
+                expire_date=expire_time,
+                name=clean_name
+            )
+            if link_obj and link_obj.invite_link:
+                logging.info(f"✅ Link de convite único ({bot_label}) gerado com sucesso: {link_obj.invite_link}")
+                return link_obj.invite_link
+        except Exception as err:
+            logging.warning(f"Aviso ao tentar gerar convite único via {bot_label}: {err}")
+
+    raise RuntimeError("Não foi possível gerar link de convite exclusivo no Canal VIP. Verifique as permissões de administrador do bot no canal.")
+
+
 async def deliver_vip_access(app: Application, chat_id: int, user_id: int, user_name: str, identifier: str):
-    """Entrega o link de acesso VIP exclusivo ao cliente e notifica o administrador."""
-    invite_link = None
-    try:
-        # Gera um link de convite exclusivo e de uso único (1 pessoa) para o Canal VIP
-        link_obj = await app.bot.create_chat_invite_link(
-            chat_id=TELEGRAM_VIP_CHANNEL_ID,
-            member_limit=1,
-            name=f"Venda PIX - {user_name}"
+    """
+    Entrega o link de acesso VIP exclusivo de uso único ao cliente e notifica o administrador.
+    Possui proteção de concorrência (idempotência) para evitar envios ou links duplicados.
+    """
+    async with DELIVERY_LOCK:
+        if identifier in PROCESSED_IDENTIFIERS:
+            logging.info(f"⚡ Transação {identifier} já entregue anteriormente nesta sessão. Ignorando chamada concorrente.")
+            return
+
+        from src.database import is_order_delivered, record_sales_order, get_sales_order
+        if is_order_delivered(identifier):
+            logging.info(f"⚡ Transação {identifier} já registrada como entregue no banco de dados.")
+            order = get_sales_order(identifier)
+            invite_link = order.get("invite_link")
+            if invite_link:
+                PROCESSED_IDENTIFIERS.add(identifier)
+                return
+
+        logging.info(f"🚀 Iniciando entrega de acesso VIP para {user_name} (ID: {user_id}), transação: {identifier}...")
+
+        try:
+            invite_link = await generate_single_use_vip_invite(user_id, user_name, identifier)
+        except Exception as e:
+            logging.error(f"❌ Erro ao gerar link de convite exclusivo: {e}")
+            error_notify = (
+                f"🚨 **ALERTA DE VENDA PAGA - ERRO AO GERAR LINK VIP!**\n\n"
+                f"👤 **Cliente:** {user_name} (ID: `{user_id}`)\n"
+                f"🆔 **Transação:** `{identifier}`\n"
+                f"⚠️ **Erro:** `{e}`\n\n"
+                f"👉 Por favor, envie o convite manualmente para o cliente ou verifique as permissões do bot no canal VIP `{TELEGRAM_VIP_CHANNEL_ID}`."
+            )
+            try:
+                await app.bot.send_message(chat_id=ADMIN_CHAT_ID, text=error_notify, parse_mode="Markdown")
+            except Exception:
+                pass
+
+            client_fallback = (
+                f"🎉 **PAGAMENTO CONFIRMADO COM SUCESSO!**\n\n"
+                f"Olá, {user_name}! Seu PIX foi aprovado pela SyncPay.\n\n"
+                f"Estamos finalizando a liberação do seu acesso. Caso não abra automaticamente, por favor chame nosso suporte imediato:"
+            )
+            kb_err = [[InlineKeyboardButton("💬 Chamar Suporte VIP", url="https://t.me/leh_lurdes")]]
+            await app.bot.send_message(chat_id=chat_id, text=client_fallback, reply_markup=InlineKeyboardMarkup(kb_err), parse_mode="Markdown")
+            return
+
+        # Registra a venda no banco de dados e adiciona na trava em memória
+        record_sales_order(identifier, user_id, user_name, amount=10.0, status="completed", invite_link=invite_link)
+        PROCESSED_IDENTIFIERS.add(identifier)
+
+        success_text = (
+            f"🎉 **PAGAMENTO CONFIRMADO COM SUCESSO!**\n\n"
+            f"Parabéns, {user_name}! Seu pagamento via PIX no valor de **R$ 10,00** foi aprovado instantaneamente pela SyncPay.\n\n"
+            f"🍿 **Seu Acesso Vitalício ao Canal VIP está Liberado!**\n\n"
+            f"👇 **Clique no botão abaixo para entrar:**\n\n"
+            f"🔒 _Atenção: Este link é exclusivo e de **uso único para o seu usuário (ID: {user_id})**. "
+            f"Assim que você clicar e entrar no canal, o link será automaticamente revogado pelo Telegram por segurança._"
         )
-        invite_link = link_obj.invite_link
-    except Exception as e:
-        logging.error(f"Erro ao gerar link de convite único via Bot API: {e}")
-        # Fallback de link genérico se houver permissão
-        invite_link = "https://t.me/+o8H2Q..."
 
-    success_text = (
-        f"🎉 **PAGAMENTO CONFIRMADO COM SUCESSO!**\n\n"
-        f"Parabéns, {user_name}! Seu pagamento via PIX foi aprovado instantaneamente pela SyncPay.\n\n"
-        f"🍿 **Seu Acesso ao Canal VIP está Liberado!**\n"
-        f"Clique no botão abaixo para entrar agora mesmo:"
-    )
+        keyboard = [
+            [InlineKeyboardButton("🚀 ENTRAR NO CANAL VIP AGORA", url=invite_link)],
+            [InlineKeyboardButton("💬 Suporte VIP", url="https://t.me/leh_lurdes")]
+        ]
 
-    keyboard = [
-        [InlineKeyboardButton("🚀 ENTRAR NO CANAL VIP AGORA", url=invite_link)],
-        [InlineKeyboardButton("💬 Suporte Humano", url="https://t.me/leh_lurdes")]
-    ]
-
-    await app.bot.send_message(
-        chat_id=chat_id,
-        text=success_text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown"
-    )
-
-    # Notifica o administrador do sistema
-    try:
-        admin_notify = (
-            f"💰 **NOVA VENDA REALIZADA COM SUCESSO!**\n\n"
-            f"👤 **Cliente:** {user_name} (ID: `{user_id}`)\n"
-            f"💵 **Valor:** R$ 10,00 (PIX SyncPay)\n"
-            f"🆔 **Transação:** `{identifier}`\n"
-            f"🔗 **Convite Gerado:** {invite_link}"
+        await app.bot.send_message(
+            chat_id=chat_id,
+            text=success_text,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="Markdown"
         )
-        await app.bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_notify, parse_mode="Markdown")
-    except Exception as err:
-        logging.warning(f"Não foi possível notificar admin {ADMIN_CHAT_ID}: {err}")
 
+        # Notifica o administrador do sistema
+        try:
+            admin_notify = (
+                f"💰 **NOVA VENDA REALIZADA COM SUCESSO!**\n\n"
+                f"👤 **Cliente:** {user_name} (ID: `{user_id}`)\n"
+                f"💵 **Valor:** R$ 10,00 (PIX SyncPay)\n"
+                f"🆔 **Transação:** `{identifier}`\n"
+                f"🔗 **Link Único Gerado:** {invite_link}\n"
+                f"⏱️ **Regra:** Limite de 1 membro (Auto-revogação ativa)"
+            )
+            await app.bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_notify, parse_mode="Markdown")
+        except Exception as err:
+            logging.warning(f"Não foi possível notificar admin {ADMIN_CHAT_ID}: {err}")
 
 
 async def auto_check_pix_loop(app: Application, chat_id: int, user_id: int, user_name: str, identifier: str):
@@ -247,6 +329,8 @@ async def auto_check_pix_loop(app: Application, chat_id: int, user_id: int, user
     max_checks = 90  # 90 tentativas * 10s = 15 minutos
     for _ in range(max_checks):
         await asyncio.sleep(10)
+        if identifier in PROCESSED_IDENTIFIERS:
+            break
         res = check_transaction_status(identifier)
         status = res.get("status", "pending")
         if status in ["completed", "paid"]:
