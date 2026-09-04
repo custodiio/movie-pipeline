@@ -2617,26 +2617,12 @@ if __name__ == "__main__":
 
 async def _fetch_recent_movies_for_upload():
     """Busca filmes recentes prontos para upload no banco de dados SQLite / PostgreSQL."""
-    from src.database import DATABASE_URL, _get_pg_conn, _get_sqlite_conn
-    movies = []
+    from src.database import get_recent_movies_for_upload
     try:
-        if DATABASE_URL:
-            conn = _get_pg_conn()
-            cursor = conn.cursor()
-            cursor.execute("SELECT tmdb_id, title, status FROM movie_pipeline_movies WHERE status IN ('concluido', 'selected', 'pending') ORDER BY tmdb_id DESC LIMIT 5")
-            movies = cursor.fetchall()
-            cursor.close()
-            conn.close()
-        else:
-            conn = _get_sqlite_conn()
-            cursor = conn.cursor()
-            cursor.execute("SELECT tmdb_id, title, status FROM movies WHERE status IN ('concluido', 'selected', 'pending') ORDER BY tmdb_id DESC LIMIT 5")
-            movies = cursor.fetchall()
-            cursor.close()
-            conn.close()
+        return get_recent_movies_for_upload(5)
     except Exception as e:
         logging.error(f"Erro no banco de dados ao buscar filmes para upload: {e}")
-    return movies
+        return []
 
 
 async def _resolve_and_prepare_upload_assets(movie_info: dict, target_msg, context: ContextTypes.DEFAULT_TYPE):

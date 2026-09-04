@@ -14,6 +14,16 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "database.db")
 
 
+def _get_pg_conn():
+    """Retorna conexão PostgreSQL direta (para compatibilidade legada)."""
+    return psycopg2.connect(DATABASE_URL)
+
+
+def _get_sqlite_conn():
+    """Retorna conexão SQLite direta (para compatibilidade legada)."""
+    return sqlite3.connect(DB_PATH)
+
+
 def _get_active_conn():
     """Tenta conexão PostgreSQL (Neon.tech). Se falhar ou exceder cota, usa SQLite local."""
     if DATABASE_URL:
@@ -255,3 +265,17 @@ def get_sales_order(identifier: str) -> dict:
             "invite_link": row[5]
         }
     return {}
+
+
+def get_recent_movies_for_upload(limit: int = 5):
+    """Busca filmes recentes prontos para upload no banco de dados ativo (PostgreSQL com fallback SQLite)."""
+    conn, db_type = _get_active_conn()
+    cur = conn.cursor()
+    if db_type == "pg":
+        cur.execute("SELECT tmdb_id, title, status FROM movie_pipeline_movies WHERE status IN ('concluido', 'selected', 'pending') ORDER BY tmdb_id DESC LIMIT %s", (limit,))
+    else:
+        cur.execute("SELECT tmdb_id, title, status FROM movies WHERE status IN ('concluido', 'selected', 'pending') ORDER BY tmdb_id DESC LIMIT ?", (limit,))
+    movies = cur.fetchall()
+    cur.close()
+    conn.close()
+    return movies
