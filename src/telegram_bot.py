@@ -570,6 +570,8 @@ async def start_create_post(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_search_movie(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Passo 2: Busca no TMDB e exibe opções em botões inline."""
+    if await check_main_menu_intercept(update, context):
+        return ConversationHandler.END
     query = update.message.text.strip()
     status_msg = await update.message.reply_text(f"🔍 Buscando '{query}' no TMDB...")
 
@@ -1673,6 +1675,8 @@ async def handle_produce_confirm_callback(update: Update, context: ContextTypes.
 
 
 async def handle_produce_manual_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_main_menu_intercept(update, context):
+        return ConversationHandler.END
     user_query = update.message.text.strip()
     msg = await update.message.reply_text(f"🔎 Buscando '{user_query}' no TMDB...")
 
@@ -2194,6 +2198,8 @@ async def initiate_thumb_standalone(update: Update, context: ContextTypes.DEFAUL
 
 
 async def handle_thumb_input_movie_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_main_menu_intercept(update, context):
+        return ConversationHandler.END
     user_query = update.message.text.strip()
     msg = await update.message.reply_text(f"🔎 Buscando '{user_query}' no TMDB...")
     try:
@@ -2248,6 +2254,8 @@ async def initiate_guide_standalone(update: Update, context: ContextTypes.DEFAUL
 
 
 async def handle_guide_input_movie_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if await check_main_menu_intercept(update, context):
+        return ConversationHandler.END
     user_query = update.message.text.strip()
     msg = await update.message.reply_text(f"🔎 Buscando '{user_query}' no TMDB...")
     try:
@@ -2611,6 +2619,36 @@ if __name__ == "__main__":
     application.run_polling()
 
 
+MAIN_MENU_ACTIONS = {
+    "🎬 Produzir Filme (Pipeline)": initiate_produce_movie,
+    "🖼️ Criar Thumbnail (Capa 16:9)": initiate_thumb_standalone,
+    "📝 Gerar Guia de Postagem (IA)": initiate_guide_standalone,
+    "📺 Postar no YouTube (Privado)": initiate_youtube_upload_standalone,
+    "🌐 Postar no Dailymotion": initiate_dailymotion_upload_standalone,
+    "🚀 Postar Simultâneo (YT + DM)": initiate_simultaneous_upload_standalone,
+    "📢 Criar Postagem de Venda": start_create_post,
+    "🎥 Postar Vídeo no VIP": start_post_video,
+    "🧲 Baixar Torrent p/ VIP": start_torrent_flow,
+    "ℹ️ Status dos Canais": status_command,
+    "❓ Ajuda": help_command
+}
+
+
+async def check_main_menu_intercept(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Verifica se a mensagem de texto é um botão do menu principal.
+    Se for, cancela qualquer fluxo anterior pendente e dispara imediatamente a função do botão clicado.
+    """
+    if update.message and update.message.text:
+        text = update.message.text.strip()
+        if text in MAIN_MENU_ACTIONS:
+            logging.info(f"🔄 Redirecionando clique de menu principal: '{text}'")
+            context.user_data.clear()
+            await MAIN_MENU_ACTIONS[text](update, context)
+            return True
+    return False
+
+
 # ==============================================================================
 # HELPER COMPARTILHADO: PREPARAÇÃO DE ASSETS PARA UPLOAD (DRY)
 # ==============================================================================
@@ -2793,6 +2831,8 @@ async def handle_youtube_select_movie_callback(update: Update, context: ContextT
         tmdb_id = int(data.split(":")[1])
         movie_info = get_movie_details(tmdb_id, language="pt-BR")
     else:
+        if await check_main_menu_intercept(update, context):
+            return ConversationHandler.END
         user_text = update.message.text.strip()
         msg_wait = await update.message.reply_text(f"🔍 Buscando '{user_text}' no TMDB...")
         results = search_movies(user_text, language="pt-BR")
@@ -2961,6 +3001,8 @@ async def handle_dailymotion_select_movie_callback(update: Update, context: Cont
         tmdb_id = int(data.split(":")[1])
         movie_info = get_movie_details(tmdb_id, language="pt-BR")
     else:
+        if await check_main_menu_intercept(update, context):
+            return ConversationHandler.END
         user_text = update.message.text.strip()
         msg_wait = await update.message.reply_text(f"🔍 Buscando '{user_text}' no TMDB...")
         results = search_movies(user_text, language="pt-BR")
@@ -3159,6 +3201,8 @@ async def handle_simultaneous_select_movie_callback(update: Update, context: Con
         tmdb_id = int(data.split(":")[1])
         movie_info = get_movie_details(tmdb_id, language="pt-BR")
     else:
+        if await check_main_menu_intercept(update, context):
+            return ConversationHandler.END
         user_text = update.message.text.strip()
         msg_wait = await update.message.reply_text(f"🔍 Buscando '{user_text}' no TMDB...")
         results = search_movies(user_text, language="pt-BR")

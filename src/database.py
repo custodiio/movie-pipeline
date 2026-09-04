@@ -97,7 +97,7 @@ def init_db():
 
 
 def is_movie_posted(tmdb_id: int) -> bool:
-    """Verifica se o filme já foi registrado e marcado como 'posted' ou 'concluido'."""
+    """Verifica se o filme já foi registrado e marcado como 'posted', 'concluido' ou 'selected'."""
     conn, db_type = _get_active_conn()
     cur = conn.cursor()
     if db_type == "pg":
@@ -107,7 +107,7 @@ def is_movie_posted(tmdb_id: int) -> bool:
     row = cur.fetchone()
     cur.close()
     conn.close()
-    if row and row[0] in ("posted", "concluido"):
+    if row and row[0] in ("posted", "concluido", "selected"):
         return True
     return False
 
