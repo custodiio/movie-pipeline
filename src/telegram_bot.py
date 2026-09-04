@@ -2619,33 +2619,34 @@ if __name__ == "__main__":
     application.run_polling()
 
 
-MAIN_MENU_ACTIONS = {
-    "🎬 Produzir Filme (Pipeline)": initiate_produce_movie,
-    "🖼️ Criar Thumbnail (Capa 16:9)": initiate_thumb_standalone,
-    "📝 Gerar Guia de Postagem (IA)": initiate_guide_standalone,
-    "📺 Postar no YouTube (Privado)": initiate_youtube_upload_standalone,
-    "🌐 Postar no Dailymotion": initiate_dailymotion_upload_standalone,
-    "🚀 Postar Simultâneo (YT + DM)": initiate_simultaneous_upload_standalone,
-    "📢 Criar Postagem de Venda": start_create_post,
-    "🎥 Postar Vídeo no VIP": start_post_video,
-    "🧲 Baixar Torrent p/ VIP": start_torrent_flow,
-    "ℹ️ Status dos Canais": status_command,
-    "❓ Ajuda": help_command
-}
-
-
 async def check_main_menu_intercept(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """
     Verifica se a mensagem de texto é um botão do menu principal.
     Se for, cancela qualquer fluxo anterior pendente e dispara imediatamente a função do botão clicado.
     """
-    if update.message and update.message.text:
-        text = update.message.text.strip()
-        if text in MAIN_MENU_ACTIONS:
-            logging.info(f"🔄 Redirecionando clique de menu principal: '{text}'")
-            context.user_data.clear()
-            await MAIN_MENU_ACTIONS[text](update, context)
-            return True
+    if not (update.message and update.message.text):
+        return False
+
+    text = update.message.text.strip()
+    action_map = {
+        "🎬 Produzir Filme (Pipeline)": initiate_produce_movie,
+        "🖼️ Criar Thumbnail (Capa 16:9)": initiate_thumb_standalone,
+        "📝 Gerar Guia de Postagem (IA)": initiate_guide_standalone,
+        "📺 Postar no YouTube (Privado)": initiate_youtube_upload_standalone,
+        "🌐 Postar no Dailymotion": initiate_dailymotion_upload_standalone,
+        "🚀 Postar Simultâneo (YT + DM)": initiate_simultaneous_upload_standalone,
+        "📢 Criar Postagem de Venda": start_create_post,
+        "🎥 Postar Vídeo no VIP": start_post_video,
+        "🧲 Baixar Torrent p/ VIP": start_torrent_flow,
+        "ℹ️ Status dos Canais": status_command,
+        "❓ Ajuda": help_command
+    }
+
+    if text in action_map:
+        logging.info(f"🔄 Redirecionando clique de menu principal: '{text}'")
+        context.user_data.clear()
+        await action_map[text](update, context)
+        return True
     return False
 
 
