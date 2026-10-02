@@ -1,7 +1,7 @@
 """
 Hugging Face Spaces Entrypoint — Movie-Pipeline (alehcrim/faceless-pipeline)
 Roda Gradio UI em background + Bot Telegram do Movie-Pipeline na Thread Principal.
-# Reload trigger: 2026-08-14-telethon-string-added
+# Reload trigger: 2026-10-02-instant-vip-forward-and-sales-fix
 """
 
 import sys

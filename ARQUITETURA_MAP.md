@@ -125,6 +125,6 @@ Tabela `movies`:
 - **`main.py`**:
   - Orquestrador principal da aplicação na VPS. Invoca as funções de cada etapa do pipeline em sequência.
 
-
-
-
+- **`app.py`**:
+  - Entrypoint oficial para deploy no Hugging Face Spaces (`alehcrim/faceless-pipeline`).
+  - Inicializa o banco de dados PostgreSQL Neon.tech (`init_db`), sobe a interface web Gradio de monitoramento e executa o Bot Admin do Telegram (`@TelaCheiaadmin_bot`) 24/7 na thread principal.
