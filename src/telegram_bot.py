@@ -1242,37 +1242,62 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
 
                         # Se o canal/mensagem PERMITE compartilhamento E o usuário NÃO enviou arquivo de legenda (.srt/.ass)
                         if not is_noforwards and not custom_sub:
-                            logging.info(f"⚡ Canal/Mensagem permite compartilhamento! Tentando encaminhamento instantâneo sem download...")
+                            logging.info(f"⚡ Canal/Mensagem permite compartilhamento! Tentando postagem instantânea com autoria própria (sem download)...")
                             try:
                                 await query.edit_message_text(
-                                    "⚡ <b>Canal permite compartilhamento! Encaminhando diretamente para o Canal VIP em alta velocidade...</b>",
+                                    "⚡ <b>Canal permite compartilhamento! Publicando no Canal VIP com autoria própria em alta velocidade...</b>",
                                     parse_mode="HTML"
                                 )
                                 forwarded = None
-                                # Se o usuário alterou a legenda/título, tenta enviar a mídia como cópia direta com a nova legenda
-                                if user_edited_caption and caption:
-                                    try:
+                                target_caption = caption if caption is not None else (getattr(orig_msg, "message", "") or "")
+
+                                # 1. Prioridade máxima: Envio server-side de cópia com autoria própria (zero selo de 'Encaminhado de')
+                                try:
+                                    logging.info("⚡ Tentando envio direto com autoria própria (cópia server-side sem download)...")
+                                    if not user_edited_caption and hasattr(orig_msg, "entities") and orig_msg.entities:
                                         forwarded = await client.send_file(
                                             chat_entity,
                                             file=orig_msg.media,
-                                            caption=caption,
+                                            caption=target_caption,
+                                            formatting_entities=orig_msg.entities,
+                                            supports_streaming=True
+                                        )
+                                    else:
+                                        forwarded = await client.send_file(
+                                            chat_entity,
+                                            file=orig_msg.media,
+                                            caption=target_caption,
                                             parse_mode="HTML",
                                             supports_streaming=True
                                         )
-                                        if forwarded:
-                                            logging.info("✅ Vídeo enviado como cópia direta com legenda editada (sem download)!")
-                                    except Exception as copy_err:
-                                        logging.warning(f"Aviso ao enviar com nova legenda sem download ({copy_err}). Tentando forward direto...")
+                                    if forwarded:
+                                        logging.info("✅ Vídeo postado com sucesso com autoria própria (sem selo de encaminhado)!")
+                                except Exception as copy_err:
+                                    logging.warning(f"Aviso ao enviar cópia direta com autoria ({copy_err}). Tentando forward com drop_author...")
 
+                                # 2. Segunda prioridade: Forward com drop_author=True (remove 'Encaminhado de')
+                                if not forwarded:
+                                    try:
+                                        forwarded = await client.forward_messages(
+                                            chat_entity,
+                                            orig_msg,
+                                            drop_author=True
+                                        )
+                                        if forwarded:
+                                            logging.info("✅ Vídeo encaminhado com sucesso com drop_author=True!")
+                                    except Exception as drop_err:
+                                        logging.warning(f"Aviso ao encaminhar com drop_author ({drop_err}). Tentando forward padrão...")
+
+                                # 3. Última contingência: Forward padrão caso Telegram recuse drop_author
                                 if not forwarded:
                                     forwarded = await client.forward_messages(chat_entity, orig_msg)
                                     if forwarded:
-                                        logging.info("✅ Vídeo encaminhado com sucesso instantaneamente (sem download)!")
+                                        logging.info("✅ Vídeo encaminhado via forward padrão como último fallback.")
 
                                 if forwarded:
                                     published_via_telethon = True
                             except Exception as fwd_err:
-                                logging.warning(f"⚠️ Encaminhamento direto não autorizado ou falhou ({fwd_err}). Prosseguindo para fluxo de download...")
+                                logging.warning(f"⚠️ Publicação direta com autoria falhou ({fwd_err}). Prosseguindo para fluxo de download...")
 
                         downloaded_path = None
                         # Se NÃO foi publicado via encaminhamento direto (canal protegido noforwards=True, legenda customizada ou erro no forward)
