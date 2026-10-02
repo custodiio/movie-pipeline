@@ -73,6 +73,23 @@ except ValueError:
     TELEGRAM_VIP_CHANNEL_ID = raw_vip_id
 
 
+def resolve_telethon_session_path() -> str:
+    """Resolve dinamicamente o caminho da sessão do Telethon com fallback entre discos e diretórios."""
+    path = os.getenv("TELEGRAM_SESSION_PATH", "C:/Users/alecu/Applications/DailymotionAgent/dailymotion_agent.session")
+    if os.path.exists(path):
+        return path
+    candidates = [
+        "C:/Users/alecu/Applications/DailymotionAgent/dailymotion_agent.session",
+        "d:/Applications/DailymotionAgent/dailymotion_agent.session",
+        os.path.join(os.path.dirname(__file__), "..", "dailymotion_agent.session"),
+        os.path.join(os.path.dirname(__file__), "dailymotion_agent.session")
+    ]
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+    return path
+
+
 class TelethonProgressTracker:
     """
     Rastreia o progresso de download/upload do Telethon e atualiza a mensagem no chat em tempo real.
@@ -321,7 +338,7 @@ async def execute_torrent_to_vip_pipeline(
     api_id = os.getenv("TELEGRAM_API_ID")
     api_hash = os.getenv("TELEGRAM_API_HASH")
     sess_str = os.getenv("TELEGRAM_SESSION_STRING")
-    sess_path = os.getenv("TELEGRAM_SESSION_PATH", "d:/Applications/DailymotionAgent/dailymotion_agent.session")
+    sess_path = resolve_telethon_session_path()
 
     if not (api_id and api_hash and (sess_str or os.path.exists(sess_path))):
         try:
@@ -994,7 +1011,7 @@ async def handle_receive_video(update: Update, context: ContextTypes.DEFAULT_TYP
         api_id = os.getenv("TELEGRAM_API_ID")
         api_hash = os.getenv("TELEGRAM_API_HASH")
         sess_str = os.getenv("TELEGRAM_SESSION_STRING")
-        sess_path = os.getenv("TELEGRAM_SESSION_PATH", "d:/Applications/DailymotionAgent/dailymotion_agent.session")
+        sess_path = resolve_telethon_session_path()
         if api_id and api_hash and (sess_str or os.path.exists(sess_path)):
             try:
                 from telethon import TelegramClient
@@ -1023,6 +1040,7 @@ async def handle_receive_video(update: Update, context: ContextTypes.DEFAULT_TYP
         return STATE_RECEIVE_VIDEO
 
     context.user_data["vip_video_caption"] = caption
+    context.user_data["vip_caption_edited"] = False
     context.user_data["custom_subtitle_path"] = None
 
     keyboard = [
@@ -1108,6 +1126,7 @@ async def handle_edit_vip_title_receive(update: Update, context: ContextTypes.DE
     """Recebe a legenda editada e mostra o botão de confirmação."""
     new_caption = update.message.text.strip()
     context.user_data["vip_video_caption"] = new_caption
+    context.user_data["vip_caption_edited"] = True
 
     keyboard = [
         [InlineKeyboardButton("🚀 Publicar Agora no Canal VIP", callback_data="keep_vip_title")],
@@ -1163,7 +1182,7 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
     api_id = os.getenv("TELEGRAM_API_ID")
     api_hash = os.getenv("TELEGRAM_API_HASH")
     sess_str = os.getenv("TELEGRAM_SESSION_STRING")
-    sess_path = os.getenv("TELEGRAM_SESSION_PATH", "d:/Applications/DailymotionAgent/dailymotion_agent.session")
+    sess_path = resolve_telethon_session_path()
 
     published_via_telethon = False
     error_reason = None
@@ -1211,14 +1230,63 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                             error_reason = f"Erro ao acessar canal de origem: {msg_err2}"
 
                     if orig_msg and orig_msg.media:
-                        logging.info("🎥 Mídia localizada na mensagem de origem! Iniciando processamento...")
-                        
-                        # Se temos legenda customizada ou precisamos garantir metadados/capa, baixamos temporariamente
-                        temp_dir = os.path.join(os.path.dirname(__file__), "..", "temp_vip_downloads")
-                        os.makedirs(temp_dir, exist_ok=True)
-                        
-                        tracker_down = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "⏬ Baixando Vídeo do Canal de Origem")
-                        downloaded_path = await client.download_media(orig_msg, file=temp_dir, progress_callback=tracker_down.callback)
+                        logging.info("🎥 Mídia localizada na mensagem de origem! Verificando permissões de compartilhamento...")
+
+                        is_noforwards = getattr(orig_msg, "noforwards", False)
+                        if not is_noforwards and hasattr(orig_msg, "chat"):
+                            is_noforwards = getattr(orig_msg.chat, "noforwards", False)
+                        if not is_noforwards and "source_entity" in locals() and source_entity:
+                            is_noforwards = getattr(source_entity, "noforwards", False)
+
+                        user_edited_caption = context.user_data.get("vip_caption_edited", False)
+
+                        # Se o canal/mensagem PERMITE compartilhamento E o usuário NÃO enviou arquivo de legenda (.srt/.ass)
+                        if not is_noforwards and not custom_sub:
+                            logging.info(f"⚡ Canal/Mensagem permite compartilhamento! Tentando encaminhamento instantâneo sem download...")
+                            try:
+                                await query.edit_message_text(
+                                    "⚡ <b>Canal permite compartilhamento! Encaminhando diretamente para o Canal VIP em alta velocidade...</b>",
+                                    parse_mode="HTML"
+                                )
+                                forwarded = None
+                                # Se o usuário alterou a legenda/título, tenta enviar a mídia como cópia direta com a nova legenda
+                                if user_edited_caption and caption:
+                                    try:
+                                        forwarded = await client.send_file(
+                                            chat_entity,
+                                            file=orig_msg.media,
+                                            caption=caption,
+                                            parse_mode="HTML",
+                                            supports_streaming=True
+                                        )
+                                        if forwarded:
+                                            logging.info("✅ Vídeo enviado como cópia direta com legenda editada (sem download)!")
+                                    except Exception as copy_err:
+                                        logging.warning(f"Aviso ao enviar com nova legenda sem download ({copy_err}). Tentando forward direto...")
+
+                                if not forwarded:
+                                    forwarded = await client.forward_messages(chat_entity, orig_msg)
+                                    if forwarded:
+                                        logging.info("✅ Vídeo encaminhado com sucesso instantaneamente (sem download)!")
+
+                                if forwarded:
+                                    published_via_telethon = True
+                            except Exception as fwd_err:
+                                logging.warning(f"⚠️ Encaminhamento direto não autorizado ou falhou ({fwd_err}). Prosseguindo para fluxo de download...")
+
+                        downloaded_path = None
+                        # Se NÃO foi publicado via encaminhamento direto (canal protegido noforwards=True, legenda customizada ou erro no forward)
+                        if not published_via_telethon:
+                            logging.info("⏬ Iniciando fluxo de download e reenvio (canal protegido ou legenda customizada)...")
+                            await query.edit_message_text(
+                                "⏬ <b>Canal protegido contra encaminhamento (ou legenda customizada). Baixando e processando vídeo...</b>",
+                                parse_mode="HTML"
+                            )
+                            temp_dir = os.path.join(os.path.dirname(__file__), "..", "temp_vip_downloads")
+                            os.makedirs(temp_dir, exist_ok=True)
+
+                            tracker_down = TelethonProgressTracker(context, query.message.chat_id, query.message.message_id, "⏬ Baixando Vídeo do Canal de Origem")
+                            downloaded_path = await client.download_media(orig_msg, file=temp_dir, progress_callback=tracker_down.callback)
 
                         if downloaded_path and os.path.exists(downloaded_path):
                             def _vip_sub_cb(msg_str, pct):
@@ -1330,7 +1398,7 @@ async def handle_publish_vip_video(update: Update, context: ContextTypes.DEFAULT
                                 os.remove(downloaded_path)
                             except Exception:
                                 pass
-                        else:
+                        elif not published_via_telethon:
                             error_reason = "Não foi possível baixar a mídia do canal de origem."
                     else:
                         if not error_reason:
